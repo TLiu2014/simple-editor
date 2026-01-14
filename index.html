@@ -5,22 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Simple Editor</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body>
   <div class="container">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <button id="openBtn" class="btn">Open</button>
-        <button id="saveBtn" class="btn">Save As</button>
-        <button id="outlineToggle" class="btn">Toggle Outline</button>
-        <button id="autoSaveToggle" class="btn btn-active">Auto Save: ON</button>
-      </div>
-      <div class="toolbar-right">
-        <button id="wordCountToggle" class="btn">Toggle Word Count</button>
-        <div id="wordCount" class="word-count hidden">
-          <span id="wordCountText">Words: 0 | Characters: 0</span>
-        </div>
-      </div>
+    <div class="tabs-container">
+      <div id="tabs-list" class="tabs-list"></div>
+      <button id="new-tab-btn" class="new-tab-btn" title="New Tab">+</button>
     </div>
     <div class="main-content">
       <div id="outline-panel" class="outline-panel hidden">
@@ -28,6 +19,177 @@
         <div id="outline-content" class="outline-content"></div>
       </div>
       <div id="editor-container"></div>
+      <div id="default-view" class="default-view hidden">
+        <div class="default-view-content">
+          <h1>Simple Editor</h1>
+          <p>Create a new file or open an existing one to get started.</p>
+          <div class="default-view-actions">
+            <button id="default-new-file" class="btn btn-primary">New File</button>
+            <button id="default-open-file" class="btn">Open File</button>
+          </div>
+        </div>
+      </div>
+      <div id="settings-container" class="settings-tab-container hidden">
+        <div class="settings-content">
+          <h1>Settings</h1>
+          
+          <div class="settings-section">
+            <h2>Word Count Display</h2>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showChineseWordCount">
+                Show Chinese Word Count
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showEnglishWordCount">
+                Show English Word Count
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showTotalWordCount">
+                Show Total Word Count
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showCharacterCount">
+                Show Character Count
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showWordCountBreakdown">
+                Show Detailed Breakdown
+              </label>
+              <span class="setting-hint">Shows breakdown like "Chinese: X, English: Y"</span>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showLineCount">
+                Show Line Count
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showParagraphCount">
+                Show Paragraph Count
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h2>Editor</h2>
+            
+            <div class="setting-item">
+              <label for="settings-fontSize">Font Size:</label>
+              <input type="number" id="settings-fontSize" min="8" max="72" value="14">
+            </div>
+            
+            <div class="setting-item">
+              <label for="settings-theme">Theme:</label>
+              <select id="settings-theme">
+                <option value="vs-dark">Dark</option>
+                <option value="vs">Light</option>
+                <option value="hc-black">High Contrast Dark</option>
+              </select>
+            </div>
+            
+            <div class="setting-item">
+              <label for="settings-wordWrap">Word Wrap:</label>
+              <select id="settings-wordWrap">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-minimap">
+                Show Minimap
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-lineNumbers">
+                Show Line Numbers
+              </label>
+            </div>
+          </div>
+          
+          <div class="settings-section">
+            <h2>View</h2>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showOutline">
+                Show Outline
+              </label>
+              <span class="setting-shortcut" id="shortcut-outline">⌘⇧O / Ctrl+Shift+O</span>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showWordCount">
+                Show Word Count
+              </label>
+              <span class="setting-shortcut" id="shortcut-word-count">⌘⇧W / Ctrl+Shift+W</span>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showStatusBar">
+                Show Status Bar
+              </label>
+              <span class="setting-shortcut" id="shortcut-status-bar">⌘⇧B / Ctrl+Shift+B</span>
+            </div>
+          </div>
+          
+          <div class="settings-section">
+            <h2>Auto Save</h2>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-autoSave">
+                Enable Auto Save
+              </label>
+              <span class="setting-shortcut" id="shortcut-auto-save">⌘⇧A / Ctrl+Shift+A</span>
+            </div>
+            
+            <div class="setting-item">
+              <label for="settings-autoSaveInterval">Auto Save Interval (seconds):</label>
+              <input type="number" id="settings-autoSaveInterval" min="1" max="60" value="1">
+            </div>
+          </div>
+          
+          <div class="settings-actions">
+            <button id="settings-saveBtn" class="btn btn-primary">Save</button>
+            <button id="settings-cancelBtn" class="btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="wordCount" class="word-count hidden">
+      <span id="wordCountText">Words: 0 | Characters: 0</span>
+    </div>
+    <div id="status-bar" class="status-bar">
+      <div class="status-left">
+        <span id="status-word-count">Words: 0 | Characters: 0</span>
+      </div>
+      <div class="status-right">
+        <span id="status-auto-save">Auto Save: ON</span>
+        <span id="status-save-indicator" class="save-indicator"></span>
+      </div>
     </div>
   </div>
   <script>

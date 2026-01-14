@@ -1,5 +1,6 @@
 {
   "name": "simple-editor",
+  "productName": "Simple Editor",
   "version": "1.0.0",
   "description": "A simple text editor built with Electron and Monaco Editor",
   "main": "main.js",
