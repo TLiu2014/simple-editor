@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <button id="openBtn" class="btn">Open</button>
+        <button id="saveBtn" class="btn">Save As</button>
+        <button id="outlineToggle" class="btn">Toggle Outline</button>
+        <button id="autoSaveToggle" class="btn btn-active">Auto Save: ON</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="wordCountToggle" class="btn">Toggle Word Count</button>
+        <div id="wordCount" class="word-count hidden">
+          <span id="wordCountText">Words: 0 | Characters: 0</span>
+        </div>
+      </div>
+    </div>
+    <div class="main-content">
+      <div id="outline-panel" class="outline-panel hidden">
+        <div class="outline-header">Outline</div>
+        <div id="outline-content" class="outline-content"></div>
+      </div>
+      <div id="editor-container"></div>
+    </div>
+  </div>
+  <script>
+    // Save Node's require before Monaco loader overwrites it
+    const nodeRequire = require;
+    window.nodeRequire = nodeRequire;
+    const path = nodeRequire('path');
+    
+    // Get the absolute path to Monaco
+    const monacoBasePath = path.join(__dirname, 'node_modules', 'monaco-editor', 'min');
+    
+    // Load Monaco loader
+    const loaderScript = document.createElement('script');
+    loaderScript.src = path.join(monacoBasePath, 'vs', 'loader.js');
+    
+    loaderScript.onload = function() {
+      // Configure Monaco paths
+      require.config({ 
+        baseUrl: monacoBasePath,
+        paths: { 
+          'vs': path.join(monacoBasePath, 'vs')
+        }
+      });
+      
+      // Load renderer script after Monaco is configured
+      const rendererScript = document.createElement('script');
+      rendererScript.src = 'renderer.js';
+      document.body.appendChild(rendererScript);
+    };
+    
+    loaderScript.onerror = function(err) {
+      console.error('Failed to load Monaco Editor loader:', err);
+    };
+    
+    document.head.appendChild(loaderScript);
+  </script>
+</body>
+</html>

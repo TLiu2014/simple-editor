@@ -1,0 +1,169 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #3e3e3e;
+  min-height: 50px;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn {
+  padding: 8px 16px;
+  background-color: #0e639c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.btn:hover {
+  background-color: #1177bb;
+}
+
+.btn:active {
+  background-color: #0a4d73;
+}
+
+.btn-active {
+  background-color: #0d7a3d !important;
+}
+
+.btn-active:hover {
+  background-color: #0f8a45 !important;
+}
+
+.btn-active:active {
+  background-color: #0a5d2d !important;
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 50px);
+  overflow: hidden;
+}
+
+.outline-panel {
+  width: 250px;
+  background-color: #252526;
+  border-right: 1px solid #3e3e3e;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.outline-panel.hidden {
+  display: none;
+}
+
+.outline-header {
+  padding: 10px 15px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #3e3e3e;
+  color: #cccccc;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.outline-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  color: #cccccc;
+  font-size: 13px;
+}
+
+.outline-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  margin: 2px 0;
+  transition: background-color 0.2s;
+  word-wrap: break-word;
+}
+
+.outline-item:hover {
+  background-color: #2a2d2e;
+}
+
+.outline-item.active {
+  background-color: #094771;
+}
+
+.outline-item.h1 {
+  font-weight: 600;
+  font-size: 14px;
+  padding-left: 8px;
+}
+
+.outline-item.h2 {
+  font-weight: 500;
+  font-size: 13px;
+  padding-left: 20px;
+}
+
+.outline-item.h3 {
+  font-weight: 400;
+  font-size: 12px;
+  padding-left: 32px;
+}
+
+.outline-item.h4,
+.outline-item.h5,
+.outline-item.h6 {
+  font-weight: 400;
+  font-size: 12px;
+  padding-left: 44px;
+  color: #999;
+}
+
+#editor-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.word-count {
+  padding: 8px 12px;
+  background-color: #3e3e3e;
+  color: #cccccc;
+  border-radius: 4px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.word-count.hidden {
+  display: none;
+}
