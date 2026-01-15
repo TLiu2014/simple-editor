@@ -13,12 +13,68 @@
       <div id="tabs-list" class="tabs-list"></div>
       <button id="new-tab-btn" class="new-tab-btn" title="New Tab">+</button>
     </div>
+    <div id="format-bar" class="format-bar hidden">
+      <div class="format-bar-group">
+        <select id="format-style" class="format-select" title="Text Style">
+          <option value="normal">Normal</option>
+          <option value="title">Title</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+        </select>
+      </div>
+      <div class="format-bar-separator" id="format-separator-1"></div>
+      <div class="format-bar-group" id="format-group-bold-italic-underline">
+        <button id="format-bold" class="format-btn" title="Bold (⌘B / Ctrl+B)">
+          <strong>B</strong>
+        </button>
+        <button id="format-italic" class="format-btn" title="Italic (⌘I / Ctrl+I)">
+          <em>I</em>
+        </button>
+        <button id="format-underline" class="format-btn" title="Underline (⌘U / Ctrl+U)">
+          <u>U</u>
+        </button>
+      </div>
+      <div class="format-bar-separator" id="format-separator-2"></div>
+      <div class="format-bar-group" id="format-group-lists">
+        <button id="format-list-ul" class="format-btn" title="Bullet List">
+          <span>• List</span>
+        </button>
+        <button id="format-list-ol" class="format-btn" title="Numbered List">
+          <span>1. List</span>
+        </button>
+      </div>
+      <div class="format-bar-separator" id="format-separator-3"></div>
+      <div class="format-bar-group" id="format-group-colors">
+        <label class="format-color-label" title="Font Color">
+          <span class="format-color-icon">A</span>
+          <input type="color" id="format-fontColor" class="format-color-input" value="#cccccc">
+          <input type="text" id="format-fontColor-hex" class="format-color-hex" placeholder="#cccccc" pattern="^#[0-9A-Fa-f]{6}$">
+        </label>
+        <label class="format-color-label" title="Background Color">
+          <span class="format-color-icon">▮</span>
+          <input type="color" id="format-backgroundColor" class="format-color-input" value="#1e1e1e">
+          <input type="text" id="format-backgroundColor-hex" class="format-color-hex" placeholder="#1e1e1e" pattern="^#[0-9A-Fa-f]{6}$">
+        </label>
+      </div>
+      <div class="format-bar-separator"></div>
+      <div class="format-bar-group">
+        <button id="toggle-preview" class="format-btn" title="Toggle Preview (⌘⇧P / Ctrl+Shift+P)">
+          <span>👁 Preview</span>
+        </button>
+      </div>
+    </div>
     <div class="main-content">
       <div id="outline-panel" class="outline-panel hidden">
         <div class="outline-header">Outline</div>
         <div id="outline-content" class="outline-content"></div>
       </div>
-      <div id="editor-container"></div>
+      <div id="editor-wrapper" class="editor-wrapper">
+        <div id="editor-container"></div>
+        <div id="preview-container" class="preview-container hidden">
+          <div id="preview-content" class="preview-content"></div>
+        </div>
+      </div>
       <div id="default-view" class="default-view hidden">
         <div class="default-view-content">
           <h1>Simple Editor</h1>
@@ -91,17 +147,60 @@
             <h2>Editor</h2>
             
             <div class="setting-item">
+              <label>Language Mode:</label>
+              <div class="radio-group">
+                <label>
+                  <input type="radio" name="settings-languageMode" value="plaintext" id="settings-languageMode-plaintext">
+                  Plain Text
+                </label>
+                <label>
+                  <input type="radio" name="settings-languageMode" value="markdown" id="settings-languageMode-markdown">
+                  Markdown
+                </label>
+              </div>
+            </div>
+            
+            <div class="setting-item">
               <label for="settings-fontSize">Font Size:</label>
               <input type="number" id="settings-fontSize" min="8" max="72" value="14">
             </div>
             
             <div class="setting-item">
-              <label for="settings-theme">Theme:</label>
-              <select id="settings-theme">
-                <option value="vs-dark">Dark</option>
-                <option value="vs">Light</option>
-                <option value="hc-black">High Contrast Dark</option>
-              </select>
+              <label>Theme:</label>
+              <div class="radio-group">
+                <label>
+                  <input type="radio" name="settings-theme" value="vs-dark" id="settings-theme-dark">
+                  Dark
+                </label>
+                <label>
+                  <input type="radio" name="settings-theme" value="vs" id="settings-theme-light">
+                  Light
+                </label>
+                <label>
+                  <input type="radio" name="settings-theme" value="hc-black" id="settings-theme-hc">
+                  High Contrast Dark
+                </label>
+                <label>
+                  <input type="radio" name="settings-theme" value="custom" id="settings-theme-custom">
+                  Custom
+                </label>
+              </div>
+            </div>
+            
+            <div class="setting-item">
+              <label for="settings-fontColor">Font Color:</label>
+              <div class="color-input-group">
+                <input type="color" id="settings-fontColor" value="#cccccc" title="Pick a color" disabled>
+                <input type="text" id="settings-fontColor-hex" class="color-hex-input" placeholder="#cccccc" pattern="^#[0-9A-Fa-f]{6}$" title="Enter hex color code" disabled>
+              </div>
+            </div>
+            
+            <div class="setting-item">
+              <label for="settings-backgroundColor">Background Color:</label>
+              <div class="color-input-group">
+                <input type="color" id="settings-backgroundColor" value="#1e1e1e" title="Pick a color" disabled>
+                <input type="text" id="settings-backgroundColor-hex" class="color-hex-input" placeholder="#1e1e1e" pattern="^#[0-9A-Fa-f]{6}$" title="Enter hex color code" disabled>
+              </div>
             </div>
             
             <div class="setting-item">
@@ -152,6 +251,27 @@
                 Show Status Bar
               </label>
               <span class="setting-shortcut" id="shortcut-status-bar">⌘⇧B / Ctrl+Shift+B</span>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showFormatBarBoldItalic">
+                Show Bold/Italic/Underline
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showFormatBarLists">
+                Show Bullet/Numbered Lists
+              </label>
+            </div>
+            
+            <div class="setting-item">
+              <label>
+                <input type="checkbox" id="settings-showFormatBarColors">
+                Show Color Pickers
+              </label>
             </div>
           </div>
           

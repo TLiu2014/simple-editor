@@ -137,6 +137,104 @@
   cursor: pointer;
 }
 
+.radio-group {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin: 0;
+  flex: 0;
+}
+
+.radio-group input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.color-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-input-group input[type="color"] {
+  width: 40px;
+  height: 32px;
+  border: 1px solid #4e4e4e;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+  transition: opacity 0.2s, border-color 0.2s;
+}
+
+.color-input-group input[type="color"]:hover:not(:disabled) {
+  border-color: #5e5e5e;
+}
+
+.color-input-group input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-input-group input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.color-hex-input {
+  width: 100px;
+  padding: 8px 12px;
+  background-color: #3e3e3e;
+  border: 1px solid #4e4e4e;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 14px;
+  font-family: monospace;
+  outline: none;
+  transition: opacity 0.2s, background-color 0.2s, border-color 0.2s;
+}
+
+.color-hex-input:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+
+.color-input-disabled,
+.color-input-group input[type="color"]:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background-color: #2a2a2a !important;
+  border-color: #3a3a3a !important;
+}
+
+.color-hex-input.color-input-disabled,
+.color-hex-input:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background-color: #2a2a2a !important;
+  border-color: #3a3a3a !important;
+  color: #888888 !important;
+}
+
+.settings-content.theme-vs .color-hex-input {
+  background-color: #ffffff;
+  border-color: #cccccc;
+  color: #333333;
+}
+
+.settings-content.theme-hc-black .color-hex-input {
+  background-color: #000000;
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
 .setting-shortcut {
   font-size: 11px;
   color: #999;

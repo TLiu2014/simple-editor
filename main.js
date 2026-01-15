@@ -345,6 +345,8 @@ ipcMain.handle('get-settings', () => {
   return {
     fontSize: 14,
     theme: 'vs-dark',
+    fontColor: '#cccccc',
+    backgroundColor: '#1e1e1e',
     wordWrap: 'on',
     minimap: true,
     lineNumbers: true,
@@ -362,7 +364,10 @@ ipcMain.handle('get-settings', () => {
     viewOptions: {
       showOutline: false,
       showWordCount: true, // Word count in status bar is visible by default
-      showStatusBar: true
+      showStatusBar: true,
+      showFormatBarBoldItalic: true,
+      showFormatBarLists: true,
+      showFormatBarColors: true
     }
   };
 });

@@ -8,6 +8,7 @@ let autoSaveEnabled = true; // Auto-save is enabled by default
 let wordCountVisible = false;
 let outlineVisible = false;
 let statusBarVisible = true; // Status bar visible by default
+let previewVisible = false; // Preview pane visibility
 let outlineItems = [];
 let saveIndicatorTimeout = null;
 let lastSavedContent = {}; // Track last saved content per tab
@@ -51,9 +52,16 @@ function initializeEditor() {
         return;
       }
 
+      // Get language mode from settings (default to plaintext)
+      let initialLanguage = 'plaintext';
+      // Try to get from settings if available
+      if (typeof window !== 'undefined' && window.currentSettings) {
+        initialLanguage = window.currentSettings.languageMode || 'plaintext';
+      }
+      
       editor = monaco.editor.create(container, {
         value: '',
-        language: 'plaintext',
+        language: initialLanguage,
         theme: 'vs-dark',
         automaticLayout: true,
         fontSize: 14,
@@ -92,6 +100,14 @@ function initializeEditor() {
         }
         updateWordCount();
         updateOutline();
+        if (previewVisible) {
+          updatePreview(); // Update preview in real-time
+        }
+      });
+
+      // Update format bar state on selection change
+      editor.onDidChangeCursorSelection(() => {
+        updateFormatBarState();
       });
 
       console.log('Monaco Editor initialized successfully');
@@ -576,6 +592,913 @@ function setupEventListeners() {
     // Update word count display when settings change
     updateWordCount();
   });
+
+  // Format bar event listeners
+  setupFormatBarListeners();
+}
+
+// Format bar functions
+function setupFormatBarListeners() {
+  // Setup listeners even if editor isn't ready yet - they'll work when editor is available
+
+  // Format style dropdown
+  const formatStyle = document.getElementById('format-style');
+  if (formatStyle) {
+    formatStyle.addEventListener('change', (e) => {
+      applyFormatStyle(e.target.value);
+    });
+  }
+
+  // Bold button
+  const formatBold = document.getElementById('format-bold');
+  if (formatBold) {
+    formatBold.addEventListener('click', () => {
+      applyBold();
+    });
+  }
+
+  // Italic button
+  const formatItalic = document.getElementById('format-italic');
+  if (formatItalic) {
+    formatItalic.addEventListener('click', () => {
+      applyItalic();
+    });
+  }
+
+  // Underline button
+  const formatUnderline = document.getElementById('format-underline');
+  if (formatUnderline) {
+    formatUnderline.addEventListener('click', () => {
+      applyUnderline();
+    });
+  }
+
+  // Bullet list button
+  const formatListUl = document.getElementById('format-list-ul');
+  if (formatListUl) {
+    formatListUl.addEventListener('click', () => {
+      applyBulletList();
+    });
+  }
+
+  // Numbered list button
+  const formatListOl = document.getElementById('format-list-ol');
+  if (formatListOl) {
+    formatListOl.addEventListener('click', () => {
+      applyNumberedList();
+    });
+  }
+
+  // Toggle preview button
+  const togglePreview = document.getElementById('toggle-preview');
+  if (togglePreview) {
+    togglePreview.addEventListener('click', () => {
+      togglePreviewPane();
+    });
+  }
+
+  // Format bar color pickers
+  const formatFontColor = document.getElementById('format-fontColor');
+  const formatFontColorHex = document.getElementById('format-fontColor-hex');
+  const formatBackgroundColor = document.getElementById('format-backgroundColor');
+  const formatBackgroundColorHex = document.getElementById('format-backgroundColor-hex');
+  
+  if (formatFontColor) {
+    formatFontColor.addEventListener('change', () => {
+      applyColorToEditor('fontColor', formatFontColor.value);
+      syncFormatBarToSettings();
+    });
+  }
+  if (formatFontColorHex) {
+    formatFontColorHex.addEventListener('input', () => {
+      const hexValue = formatFontColorHex.value.trim();
+      if (/^#[0-9A-Fa-f]{6}$/.test(hexValue) && formatFontColor) {
+        formatFontColor.value = hexValue;
+        applyColorToEditor('fontColor', hexValue);
+        syncFormatBarToSettings();
+      }
+    });
+    formatFontColorHex.addEventListener('blur', () => {
+      const hexValue = formatFontColorHex.value.trim();
+      if (!/^#[0-9A-Fa-f]{6}$/.test(hexValue) && formatFontColor) {
+        formatFontColorHex.value = formatFontColor.value;
+      }
+    });
+  }
+  if (formatBackgroundColor) {
+    formatBackgroundColor.addEventListener('change', () => {
+      applyColorToEditor('backgroundColor', formatBackgroundColor.value);
+      syncFormatBarToSettings();
+    });
+  }
+  if (formatBackgroundColorHex) {
+    formatBackgroundColorHex.addEventListener('input', () => {
+      const hexValue = formatBackgroundColorHex.value.trim();
+      if (/^#[0-9A-Fa-f]{6}$/.test(hexValue) && formatBackgroundColor) {
+        formatBackgroundColor.value = hexValue;
+        applyColorToEditor('backgroundColor', hexValue);
+        syncFormatBarToSettings();
+      }
+    });
+    formatBackgroundColorHex.addEventListener('blur', () => {
+      const hexValue = formatBackgroundColorHex.value.trim();
+      if (!/^#[0-9A-Fa-f]{6}$/.test(hexValue) && formatBackgroundColor) {
+        formatBackgroundColorHex.value = formatBackgroundColor.value;
+      }
+    });
+  }
+
+  // Update format bar state on selection change (will be set up when editor is ready)
+  // This is handled in initializeEditor after editor is created
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey) {
+      // Shift+Command/Ctrl shortcuts
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        togglePreviewPane();
+      }
+    } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // Command/Ctrl shortcuts
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        applyBold();
+      } else if (e.key === 'i' || e.key === 'I') {
+        e.preventDefault();
+        applyItalic();
+      } else if (e.key === 'u' || e.key === 'U') {
+        e.preventDefault();
+        applyUnderline();
+      }
+    }
+  });
+}
+
+function getSelectedText() {
+  if (!editor) return { text: '', start: 0, end: 0 };
+  
+  const selection = editor.getSelection();
+  if (!selection || selection.isEmpty()) {
+    // No selection, get current line
+    const position = editor.getPosition();
+    const line = editor.getModel().getLineContent(position.lineNumber);
+    const start = editor.getModel().getOffsetAt({ lineNumber: position.lineNumber, column: 1 });
+    const end = start + line.length;
+    return { text: line, start, end, lineNumber: position.lineNumber, isLine: true };
+  }
+  
+  const text = editor.getModel().getValueInRange(selection);
+  const start = editor.getModel().getOffsetAt(selection.getStartPosition());
+  const end = editor.getModel().getOffsetAt(selection.getEndPosition());
+  
+  return { text, start, end, selection, isLine: false };
+}
+
+function replaceText(start, end, newText, selectNewText = false) {
+  if (!editor) return;
+  
+  const model = editor.getModel();
+  const startPos = model.getPositionAt(start);
+  const endPos = model.getPositionAt(end);
+  
+  const Range = monaco.Range;
+  editor.executeEdits('format', [{
+    range: new Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+    text: newText
+  }]);
+  
+  if (selectNewText) {
+    const newEnd = start + newText.length;
+    const newEndPos = model.getPositionAt(newEnd);
+    editor.setSelection(new Range(startPos.lineNumber, startPos.column, newEndPos.lineNumber, newEndPos.column));
+  } else {
+    // Place cursor at end of replacement
+    const newEnd = start + newText.length;
+    const newEndPos = model.getPositionAt(newEnd);
+    editor.setPosition(newEndPos);
+  }
+}
+
+function applyFormatStyle(style) {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  let formattedText = selected.text.trim();
+  const model = editor.getModel();
+  
+  if (selected.isLine) {
+    // Apply to entire line
+    const lineNumber = selected.lineNumber;
+    const line = model.getLineContent(lineNumber);
+    const lineStart = model.getOffsetAt({ lineNumber, column: 1 });
+    const lineEnd = lineStart + line.length;
+    
+    let prefix = '';
+    let suffix = '';
+    
+    // Remove existing markdown formatting
+    formattedText = line.replace(/^#+\s*/, '').trim();
+    
+    switch (style) {
+      case 'title':
+        prefix = '# ';
+        break;
+      case 'h1':
+        prefix = '# ';
+        break;
+      case 'h2':
+        prefix = '## ';
+        break;
+      case 'h3':
+        prefix = '### ';
+        break;
+      case 'normal':
+        prefix = '';
+        break;
+    }
+    
+    const newText = prefix + formattedText;
+    replaceText(lineStart, lineEnd, newText);
+  } else {
+    // Apply to selected text
+    let prefix = '';
+    
+    switch (style) {
+      case 'title':
+        prefix = '# ';
+        break;
+      case 'h1':
+        prefix = '# ';
+        break;
+      case 'h2':
+        prefix = '## ';
+        break;
+      case 'h3':
+        prefix = '### ';
+        break;
+      case 'normal':
+        // Remove markdown formatting if present
+        formattedText = formattedText.replace(/^#+\s*/, '');
+        break;
+    }
+    
+    const newText = prefix + formattedText;
+    replaceText(selected.start, selected.end, newText, true);
+  }
+  
+  updateFormatBarState();
+}
+
+function applyBold() {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  let text = selected.text.trim();
+  const isBold = text.startsWith('**') && text.endsWith('**') && text.length > 4;
+  
+  if (isBold) {
+    // Remove bold
+    text = text.slice(2, -2);
+  } else {
+    // Add bold
+    text = `**${text}**`;
+  }
+  
+  replaceText(selected.start, selected.end, text, true);
+  updateFormatBarState();
+}
+
+function applyItalic() {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  let text = selected.text.trim();
+  const isItalic = (text.startsWith('*') && text.endsWith('*') && !text.startsWith('**')) || 
+                   (text.startsWith('_') && text.endsWith('_') && !text.startsWith('__'));
+  
+  if (isItalic) {
+    // Remove italic
+    text = text.replace(/^[*_]|[*_]$/g, '');
+  } else {
+    // Add italic
+    text = `*${text}*`;
+  }
+  
+  replaceText(selected.start, selected.end, text, true);
+  updateFormatBarState();
+}
+
+function applyUnderline() {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  let text = selected.text.trim();
+  // Markdown doesn't have native underline, so we'll use HTML or just add emphasis
+  // For now, we'll use a workaround with emphasis
+  const hasUnderline = text.includes('<u>') || text.startsWith('_') && text.endsWith('_');
+  
+  if (hasUnderline) {
+    // Remove underline
+    text = text.replace(/<u>|<\/u>/g, '').replace(/^_|_$/g, '');
+  } else {
+    // Add underline (using HTML since markdown doesn't support it natively)
+    text = `<u>${text}</u>`;
+  }
+  
+  replaceText(selected.start, selected.end, text, true);
+  updateFormatBarState();
+}
+
+function applyBulletList() {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  const lines = selected.text.split('\n');
+  const isList = lines.every(line => line.trim().startsWith('- ') || line.trim().startsWith('* '));
+  
+  if (isList) {
+    // Remove list markers
+    const newLines = lines.map(line => line.replace(/^[\s]*[-*]\s+/, ''));
+    replaceText(selected.start, selected.end, newLines.join('\n'));
+  } else {
+    // Add list markers
+    const newLines = lines.map(line => line.trim() ? `- ${line.trim()}` : line);
+    replaceText(selected.start, selected.end, newLines.join('\n'));
+  }
+  
+  updateFormatBarState();
+}
+
+function applyNumberedList() {
+  const selected = getSelectedText();
+  if (!selected.text && !selected.isLine) return;
+  
+  const lines = selected.text.split('\n');
+  const isList = lines.every(line => /^\s*\d+\.\s+/.test(line.trim()));
+  
+  if (isList) {
+    // Remove list markers
+    const newLines = lines.map(line => line.replace(/^\s*\d+\.\s+/, ''));
+    replaceText(selected.start, selected.end, newLines.join('\n'));
+  } else {
+    // Add numbered list markers
+    const newLines = lines.map((line, index) => {
+      if (line.trim()) {
+        return `${index + 1}. ${line.trim()}`;
+      }
+      return line;
+    });
+    replaceText(selected.start, selected.end, newLines.join('\n'));
+  }
+  
+  updateFormatBarState();
+}
+
+function updateFormatBarState() {
+  if (!editor) return;
+  
+  const selected = getSelectedText();
+  const formatStyle = document.getElementById('format-style');
+  const formatBold = document.getElementById('format-bold');
+  const formatItalic = document.getElementById('format-italic');
+  const formatUnderline = document.getElementById('format-underline');
+  
+  // Update style dropdown
+  if (formatStyle && selected.text) {
+    const text = selected.text.trim();
+    if (text.startsWith('### ')) {
+      formatStyle.value = 'h3';
+    } else if (text.startsWith('## ')) {
+      formatStyle.value = 'h2';
+    } else if (text.startsWith('# ')) {
+      formatStyle.value = 'h1';
+    } else {
+      formatStyle.value = 'normal';
+    }
+  }
+  
+  // Update button states
+  if (selected.text) {
+    const text = selected.text.trim();
+    
+    if (formatBold) {
+      formatBold.classList.toggle('active', text.startsWith('**') && text.endsWith('**') && text.length > 4);
+    }
+    
+    if (formatItalic) {
+      formatItalic.classList.toggle('active', 
+        (text.startsWith('*') && text.endsWith('*') && !text.startsWith('**')) ||
+        (text.startsWith('_') && text.endsWith('_') && !text.startsWith('__')));
+    }
+    
+    if (formatUnderline) {
+      formatUnderline.classList.toggle('active', text.includes('<u>') || (text.startsWith('_') && text.endsWith('_')));
+    }
+  } else {
+    // Reset button states when no selection
+    if (formatBold) formatBold.classList.remove('active');
+    if (formatItalic) formatItalic.classList.remove('active');
+    if (formatUnderline) formatUnderline.classList.remove('active');
+  }
+}
+
+function showFormatBar() {
+  const formatBar = document.getElementById('format-bar');
+  if (formatBar) {
+    formatBar.classList.remove('hidden');
+    updatePreviewButtonVisibility();
+  }
+}
+
+function updatePreviewButtonVisibility() {
+  const togglePreviewBtn = document.getElementById('toggle-preview');
+  if (!togglePreviewBtn) return;
+  
+  // Get current language mode
+  const languageMode = getCurrentLanguageMode();
+  
+  // Show preview button only in markdown mode
+  if (languageMode === 'markdown') {
+    togglePreviewBtn.style.display = '';
+  } else {
+    togglePreviewBtn.style.display = 'none';
+    // Also hide preview if visible but not in markdown mode
+    if (previewVisible) {
+      const previewContainer = document.getElementById('preview-container');
+      const editorWrapper = document.getElementById('editor-wrapper');
+      if (previewContainer) previewContainer.classList.add('hidden');
+      if (editorWrapper) editorWrapper.classList.remove('split-view');
+      togglePreviewBtn.classList.remove('active');
+      previewVisible = false;
+    }
+  }
+}
+
+function handleLanguageModeChange(languageMode) {
+  // Get current form values
+  const settings = getSettingsFromForm();
+  
+  // Store as current preview settings
+  currentSettings = JSON.parse(JSON.stringify(settings));
+  
+  // Check if settings are modified and update tab
+  if (originalSettings) {
+    const settingsChanged = JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
+    const settingsTab = tabs.find(t => t.id === settingsTabId);
+    if (settingsTab) {
+      settingsTab.modified = settingsChanged;
+      renderTabs();
+    }
+  }
+  
+  // Apply immediately (live preview)
+  applySettings(settings);
+  
+  // Update preview button visibility
+  updatePreviewButtonVisibility();
+  
+  // Update word count with preview settings immediately
+  updateWordCount();
+}
+
+function handleSettingChange() {
+  // Get current form values
+  const settings = getSettingsFromForm();
+  
+  // Store as current preview settings
+  currentSettings = JSON.parse(JSON.stringify(settings));
+  
+  // Check if settings are modified and update tab
+  if (originalSettings) {
+    const settingsChanged = JSON.stringify(currentSettings) !== JSON.stringify(originalSettings);
+    const settingsTab = tabs.find(t => t.id === settingsTabId);
+    if (settingsTab) {
+      settingsTab.modified = settingsChanged;
+      renderTabs();
+    }
+  }
+  
+  // Apply immediately (live preview)
+  applySettings(settings);
+  
+  // Update word count with preview settings immediately
+  updateWordCount();
+}
+
+function setupColorPickerSync(colorPickerId, hexInputId) {
+  const colorPicker = document.getElementById(colorPickerId);
+  const hexInput = document.getElementById(hexInputId);
+  
+  if (colorPicker && hexInput) {
+    // Sync color picker to hex input
+    colorPicker.addEventListener('change', () => {
+      hexInput.value = colorPicker.value;
+      if (colorPickerId.startsWith('settings-')) {
+        handleSettingChange();
+      }
+    });
+    
+    // Sync hex input to color picker
+    hexInput.addEventListener('input', () => {
+      const hexValue = hexInput.value.trim();
+      if (/^#[0-9A-Fa-f]{6}$/.test(hexValue)) {
+        colorPicker.value = hexValue;
+        if (colorPickerId.startsWith('settings-')) {
+          handleSettingChange();
+        }
+      }
+    });
+    
+    // Also trigger on blur to validate
+    hexInput.addEventListener('blur', () => {
+      const hexValue = hexInput.value.trim();
+      if (!/^#[0-9A-Fa-f]{6}$/.test(hexValue)) {
+        // Reset to color picker value if invalid
+        hexInput.value = colorPicker.value;
+      }
+    });
+  }
+}
+
+function applyColorToEditor(type, color) {
+  if (!editor) return;
+  
+  // Monaco Editor doesn't directly support custom font/background colors for the entire editor
+  // We'll need to use CSS to override the editor's colors
+  const editorContainer = document.getElementById('editor-container');
+  if (editorContainer) {
+    if (type === 'fontColor') {
+      editorContainer.style.setProperty('--editor-font-color', color);
+      // Use CSS to override Monaco's text color
+      const style = document.createElement('style');
+      style.id = 'editor-font-color-style';
+      const existingStyle = document.getElementById('editor-font-color-style');
+      if (existingStyle) existingStyle.remove();
+      style.textContent = `
+        #editor-container .monaco-editor .view-lines .view-line span {
+          color: ${color} !important;
+        }
+        #editor-container .monaco-editor .view-lines {
+          color: ${color} !important;
+        }
+        #editor-container .monaco-editor .current-line {
+          color: ${color} !important;
+        }
+      `;
+      document.head.appendChild(style);
+    } else if (type === 'backgroundColor') {
+      editorContainer.style.setProperty('--editor-bg-color', color);
+      // Apply background color using Monaco's theme customization
+      const style = document.createElement('style');
+      style.id = 'editor-bg-color-style';
+      const existingStyle = document.getElementById('editor-bg-color-style');
+      if (existingStyle) existingStyle.remove();
+      style.textContent = `
+        #editor-container .monaco-editor .monaco-editor-background {
+          background-color: ${color} !important;
+        }
+        #editor-container .monaco-editor {
+          background-color: ${color} !important;
+        }
+        #editor-container .monaco-editor .margin {
+          background-color: ${color} !important;
+        }
+        #editor-container .monaco-editor .current-line {
+          background-color: ${color} !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }
+}
+
+async function syncFormatBarToSettings() {
+  const formatFontColor = document.getElementById('format-fontColor');
+  const formatBackgroundColor = document.getElementById('format-backgroundColor');
+  const settingsFontColor = document.getElementById('settings-fontColor');
+  const settingsBackgroundColor = document.getElementById('settings-backgroundColor');
+  const settingsFontColorHex = document.getElementById('settings-fontColor-hex');
+  const settingsBackgroundColorHex = document.getElementById('settings-backgroundColor-hex');
+  
+  // Get current color values from format bar
+  const fontColorValue = formatFontColor ? formatFontColor.value : null;
+  const backgroundColorValue = formatBackgroundColor ? formatBackgroundColor.value : null;
+  
+  if (!fontColorValue || !backgroundColorValue) {
+    return; // Format bar colors not available
+  }
+  
+  // Switch to custom theme when colors are changed
+  const themeCustomRadio = document.getElementById('settings-theme-custom');
+  const themeDarkRadio = document.getElementById('settings-theme-dark');
+  const themeLightRadio = document.getElementById('settings-theme-light');
+  const themeHcRadio = document.getElementById('settings-theme-hc');
+  
+  // Always switch to custom theme when colors are changed
+  if (themeCustomRadio) {
+    // Uncheck other theme radio buttons
+    if (themeDarkRadio) themeDarkRadio.checked = false;
+    if (themeLightRadio) themeLightRadio.checked = false;
+    if (themeHcRadio) themeHcRadio.checked = false;
+    
+    // Check custom theme radio button
+    themeCustomRadio.checked = true;
+    updateColorInputsEnabled(true);
+    
+    // Update currentSettings theme immediately
+    if (currentSettings) {
+      currentSettings.theme = 'custom';
+    }
+  }
+  
+  // Update settings form inputs (if settings tab is open)
+  if (settingsFontColor) {
+    settingsFontColor.value = fontColorValue;
+  }
+  if (settingsFontColorHex) {
+    settingsFontColorHex.value = fontColorValue;
+  }
+  if (settingsBackgroundColor) {
+    settingsBackgroundColor.value = backgroundColorValue;
+  }
+  if (settingsBackgroundColorHex) {
+    settingsBackgroundColorHex.value = backgroundColorValue;
+  }
+  
+  // Load current settings from disk if not already loaded
+  if (!currentSettings) {
+    try {
+      const savedSettings = await ipcRenderer.invoke('get-settings');
+      currentSettings = JSON.parse(JSON.stringify(savedSettings));
+    } catch (err) {
+      // If that fails, create a minimal settings object
+      currentSettings = {
+        fontSize: 14,
+        wordWrap: 'on',
+        minimap: true,
+        lineNumbers: true,
+        autoSave: true,
+        autoSaveInterval: 1000
+      };
+    }
+  }
+  
+  // Update color values and theme in currentSettings
+  currentSettings.fontColor = fontColorValue;
+  currentSettings.backgroundColor = backgroundColorValue;
+  currentSettings.theme = 'custom';
+  
+  // Save the updated settings to disk immediately
+  try {
+    const result = await ipcRenderer.invoke('save-settings', currentSettings);
+    if (result.success) {
+      console.log('Theme automatically switched to custom and saved');
+      
+      // Update originalSettings if settings tab is open
+      if (settingsTabId && originalSettings) {
+        originalSettings = JSON.parse(JSON.stringify(currentSettings));
+        // Clear modified flag since we just saved
+        const settingsTab = tabs.find(t => t.id === settingsTabId);
+        if (settingsTab) {
+          settingsTab.modified = false;
+          renderTabs();
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to save settings:', err);
+  }
+}
+
+function updateColorInputsEnabled(enabled) {
+  const fontColor = document.getElementById('settings-fontColor');
+  const fontColorHex = document.getElementById('settings-fontColor-hex');
+  const backgroundColor = document.getElementById('settings-backgroundColor');
+  const backgroundColorHex = document.getElementById('settings-backgroundColor-hex');
+  
+  // Update disabled state
+  if (fontColor) {
+    fontColor.disabled = !enabled;
+    fontColor.style.opacity = enabled ? '1' : '0.5';
+    fontColor.style.cursor = enabled ? 'pointer' : 'not-allowed';
+  }
+  if (fontColorHex) {
+    fontColorHex.disabled = !enabled;
+    fontColorHex.style.opacity = enabled ? '1' : '0.5';
+    fontColorHex.style.cursor = enabled ? 'text' : 'not-allowed';
+  }
+  if (backgroundColor) {
+    backgroundColor.disabled = !enabled;
+    backgroundColor.style.opacity = enabled ? '1' : '0.5';
+    backgroundColor.style.cursor = enabled ? 'pointer' : 'not-allowed';
+  }
+  if (backgroundColorHex) {
+    backgroundColorHex.disabled = !enabled;
+    backgroundColorHex.style.opacity = enabled ? '1' : '0.5';
+    backgroundColorHex.style.cursor = enabled ? 'text' : 'not-allowed';
+  }
+  
+  // Add/remove disabled class for additional styling
+  const colorInputs = [fontColor, fontColorHex, backgroundColor, backgroundColorHex];
+  colorInputs.forEach(input => {
+    if (input) {
+      if (enabled) {
+        input.classList.remove('color-input-disabled');
+      } else {
+        input.classList.add('color-input-disabled');
+      }
+    }
+  });
+}
+
+function hideFormatBar() {
+  const formatBar = document.getElementById('format-bar');
+  if (formatBar) {
+    formatBar.classList.add('hidden');
+  }
+}
+
+// Markdown preview functions
+function togglePreviewPane() {
+  previewVisible = !previewVisible;
+  const editorWrapper = document.getElementById('editor-wrapper');
+  const previewContainer = document.getElementById('preview-container');
+  const togglePreviewBtn = document.getElementById('toggle-preview');
+  
+  if (previewVisible) {
+    if (editorWrapper) editorWrapper.classList.add('split-view');
+    if (previewContainer) previewContainer.classList.remove('hidden');
+    if (togglePreviewBtn) togglePreviewBtn.classList.add('active');
+    updatePreview();
+  } else {
+    if (editorWrapper) editorWrapper.classList.remove('split-view');
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (togglePreviewBtn) togglePreviewBtn.classList.remove('active');
+  }
+}
+
+function updatePreview() {
+  if (!previewVisible || !editor) return;
+  
+  const previewContent = document.getElementById('preview-content');
+  if (!previewContent) return;
+  
+  const markdown = editor.getValue();
+  const html = renderMarkdown(markdown);
+  previewContent.innerHTML = html;
+  
+  // Sync scroll position (optional - can be enhanced)
+  syncPreviewScroll();
+}
+
+function renderMarkdown(markdown) {
+  if (!markdown) return '';
+  
+  const lines = markdown.split('\n');
+  const result = [];
+  let inCodeBlock = false;
+  let codeBlockContent = [];
+  let inList = false;
+  let listType = null;
+  let listItems = [];
+  
+  function processInline(text) {
+    // Don't process inline formatting inside code blocks
+    if (inCodeBlock) return escapeHtml(text);
+    
+    let html = escapeHtml(text);
+    
+    // Code spans (must be before other formatting)
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // Bold (**text** or __text__)
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    
+    // Italic (*text* or _text_)
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+    
+    // Underline (<u>text</u>)
+    html = html.replace(/<u>([^<]+)<\/u>/g, '<u>$1</u>');
+    
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    
+    return html;
+  }
+  
+  function closeList() {
+    if (inList && listItems.length > 0) {
+      const listTag = listType === 'ol' ? 'ol' : 'ul';
+      result.push(`<${listTag}>`);
+      listItems.forEach(item => {
+        result.push(`  <li>${processInline(item)}</li>`);
+      });
+      result.push(`</${listTag}>`);
+      listItems = [];
+    }
+    inList = false;
+    listType = null;
+  }
+  
+  function closeCodeBlock() {
+    if (inCodeBlock && codeBlockContent.length > 0) {
+      result.push('<pre><code>' + escapeHtml(codeBlockContent.join('\n')) + '</code></pre>');
+      codeBlockContent = [];
+    }
+    inCodeBlock = false;
+  }
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    // Code blocks
+    if (trimmed.startsWith('```')) {
+      closeList();
+      closeCodeBlock();
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      continue;
+    }
+    
+    // Headings
+    if (trimmed.match(/^#{1,6}\s/)) {
+      closeList();
+      const match = trimmed.match(/^(#{1,6})\s+(.*)$/);
+      if (match) {
+        const level = match[1].length;
+        const text = match[2];
+        result.push(`<h${level}>${processInline(text)}</h${level}>`);
+      }
+      continue;
+    }
+    
+    // Horizontal rules
+    if (trimmed.match(/^(---|\*\*\*)$/)) {
+      closeList();
+      result.push('<hr>');
+      continue;
+    }
+    
+    // Blockquotes
+    if (trimmed.startsWith('>')) {
+      closeList();
+      const text = trimmed.substring(1).trim();
+      result.push(`<blockquote>${processInline(text)}</blockquote>`);
+      continue;
+    }
+    
+    // Lists
+    const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+    const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/);
+    
+    if (numberedMatch || bulletMatch) {
+      const itemText = numberedMatch ? numberedMatch[2] : bulletMatch[1];
+      const currentListType = numberedMatch ? 'ol' : 'ul';
+      
+      if (!inList || listType !== currentListType) {
+        closeList();
+        inList = true;
+        listType = currentListType;
+      }
+      
+      listItems.push(itemText);
+      continue;
+    }
+    
+    // Regular paragraph or empty line
+    closeList();
+    
+    if (trimmed) {
+      result.push(`<p>${processInline(trimmed)}</p>`);
+    } else {
+      result.push('');
+    }
+  }
+  
+  // Close any open blocks
+  closeList();
+  closeCodeBlock();
+  
+  return result.join('\n');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function syncPreviewScroll() {
+  // Optional: Sync scroll position between editor and preview
+  // This can be enhanced for better UX
 }
 
 // Update shortcut display based on platform
@@ -602,6 +1525,8 @@ function updateShortcutDisplay() {
 // Load and apply settings
 async function loadSettings() {
   const settings = await ipcRenderer.invoke('get-settings');
+  // Store original settings for getCurrentLanguageMode
+  originalSettings = settings;
   await applySettings(settings);
   
   // Apply view options from settings
@@ -736,6 +1661,16 @@ function loadSettingsIntoForm() {
       };
     }
     
+    // Sync format bar colors to settings if they differ (user may have changed them)
+    const formatFontColor = document.getElementById('format-fontColor');
+    const formatBackgroundColor = document.getElementById('format-backgroundColor');
+    if (formatFontColor && formatFontColor.value) {
+      settings.fontColor = formatFontColor.value;
+    }
+    if (formatBackgroundColor && formatBackgroundColor.value) {
+      settings.backgroundColor = formatBackgroundColor.value;
+    }
+    
     // Always load fresh settings from disk when opening settings tab
     // This ensures we start with the currently saved settings
     originalSettings = JSON.parse(JSON.stringify(settings)); // Deep copy - these are the saved settings
@@ -751,16 +1686,55 @@ function loadSettingsIntoForm() {
 
 function loadFormValues(settings) {
   // Load editor settings into form
+  const languageMode = settings.languageMode || 'plaintext';
+  const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
+  const markdownRadio = document.getElementById('settings-languageMode-markdown');
+  if (plaintextRadio) plaintextRadio.checked = (languageMode === 'plaintext');
+  if (markdownRadio) markdownRadio.checked = (languageMode === 'markdown');
+  
+  // Load theme from radio buttons
+  const theme = settings.theme || 'vs-dark';
+  const themeDarkRadio = document.getElementById('settings-theme-dark');
+  const themeLightRadio = document.getElementById('settings-theme-light');
+  const themeHcRadio = document.getElementById('settings-theme-hc');
+  const themeCustomRadio = document.getElementById('settings-theme-custom');
+  if (themeDarkRadio) themeDarkRadio.checked = (theme === 'vs-dark');
+  if (themeLightRadio) themeLightRadio.checked = (theme === 'vs');
+  if (themeHcRadio) themeHcRadio.checked = (theme === 'hc-black');
+  if (themeCustomRadio) themeCustomRadio.checked = (theme === 'custom');
+  
+  // Enable/disable color inputs based on theme
+  updateColorInputsEnabled(theme === 'custom');
+  
+  // Load colors
+  const fontColor = settings.fontColor || '#cccccc';
+  const backgroundColor = settings.backgroundColor || '#1e1e1e';
+  const fontColorEl = document.getElementById('settings-fontColor');
+  const fontColorHexEl = document.getElementById('settings-fontColor-hex');
+  const backgroundColorEl = document.getElementById('settings-backgroundColor');
+  const backgroundColorHexEl = document.getElementById('settings-backgroundColor-hex');
+  if (fontColorEl) fontColorEl.value = fontColor;
+  if (fontColorHexEl) fontColorHexEl.value = fontColor;
+  if (backgroundColorEl) backgroundColorEl.value = backgroundColor;
+  if (backgroundColorHexEl) backgroundColorHexEl.value = backgroundColor;
+  
+  // Sync to format bar
+  const formatFontColor = document.getElementById('format-fontColor');
+  const formatFontColorHex = document.getElementById('format-fontColor-hex');
+  const formatBackgroundColor = document.getElementById('format-backgroundColor');
+  const formatBackgroundColorHex = document.getElementById('format-backgroundColor-hex');
+  if (formatFontColor) formatFontColor.value = fontColor;
+  if (formatFontColorHex) formatFontColorHex.value = fontColor;
+  if (formatBackgroundColor) formatBackgroundColor.value = backgroundColor;
+  if (formatBackgroundColorHex) formatBackgroundColorHex.value = backgroundColor;
+  
   const fontSizeEl = document.getElementById('settings-fontSize');
-  const themeEl = document.getElementById('settings-theme');
   const wordWrapEl = document.getElementById('settings-wordWrap');
   const minimapEl = document.getElementById('settings-minimap');
   const lineNumbersEl = document.getElementById('settings-lineNumbers');
   const autoSaveEl = document.getElementById('settings-autoSave');
   const autoSaveIntervalEl = document.getElementById('settings-autoSaveInterval');
-  
   if (fontSizeEl) fontSizeEl.value = settings.fontSize || 14;
-  if (themeEl) themeEl.value = settings.theme || 'vs-dark';
   if (wordWrapEl) wordWrapEl.value = settings.wordWrap || 'on';
   if (minimapEl) minimapEl.checked = settings.minimap !== false;
   if (lineNumbersEl) lineNumbersEl.checked = settings.lineNumbers !== false;
@@ -795,6 +1769,14 @@ function loadFormValues(settings) {
   if (showOutlineEl) showOutlineEl.checked = viewOptions.showOutline !== undefined ? viewOptions.showOutline : outlineVisible;
   if (showWordCountViewEl) showWordCountViewEl.checked = viewOptions.showWordCount !== undefined ? viewOptions.showWordCount : wordCountVisible;
   if (showStatusBarEl) showStatusBarEl.checked = viewOptions.showStatusBar !== undefined ? viewOptions.showStatusBar : statusBarVisible;
+  
+  // Load format bar visibility options
+  const showFormatBarBoldItalicEl = document.getElementById('settings-showFormatBarBoldItalic');
+  const showFormatBarListsEl = document.getElementById('settings-showFormatBarLists');
+  const showFormatBarColorsEl = document.getElementById('settings-showFormatBarColors');
+  if (showFormatBarBoldItalicEl) showFormatBarBoldItalicEl.checked = viewOptions.showFormatBarBoldItalic !== undefined ? viewOptions.showFormatBarBoldItalic : true;
+  if (showFormatBarListsEl) showFormatBarListsEl.checked = viewOptions.showFormatBarLists !== undefined ? viewOptions.showFormatBarLists : true;
+  if (showFormatBarColorsEl) showFormatBarColorsEl.checked = viewOptions.showFormatBarColors !== undefined ? viewOptions.showFormatBarColors : true;
   
   // Update shortcut display based on platform
   updateShortcutDisplay();
@@ -875,16 +1857,120 @@ function setupSettingsForm() {
     });
   }
   
+  // Setup language mode radio buttons
+  const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
+  const markdownRadio = document.getElementById('settings-languageMode-markdown');
+  if (plaintextRadio) {
+    plaintextRadio.addEventListener('change', () => {
+      if (plaintextRadio.checked) {
+        handleLanguageModeChange('plaintext');
+      }
+    });
+  }
+  if (markdownRadio) {
+    markdownRadio.addEventListener('change', () => {
+      if (markdownRadio.checked) {
+        handleLanguageModeChange('markdown');
+      }
+    });
+  }
+  
+  // Setup theme radio buttons
+  const themeDarkRadio = document.getElementById('settings-theme-dark');
+  const themeLightRadio = document.getElementById('settings-theme-light');
+  const themeHcRadio = document.getElementById('settings-theme-hc');
+  const themeCustomRadio = document.getElementById('settings-theme-custom');
+  
+  // Default colors for each theme
+  const themeDefaults = {
+    'vs-dark': { fontColor: '#cccccc', backgroundColor: '#1e1e1e' },
+    'vs': { fontColor: '#333333', backgroundColor: '#ffffff' },
+    'hc-black': { fontColor: '#ffffff', backgroundColor: '#000000' },
+    'custom': null // Custom theme uses current color values
+  };
+  
+  const handleThemeChange = (themeValue) => {
+    updateColorInputsEnabled(themeValue === 'custom');
+    
+    // If switching to a preset theme, update color values to theme defaults
+    if (themeValue !== 'custom' && themeDefaults[themeValue]) {
+      const defaults = themeDefaults[themeValue];
+      const settingsFontColor = document.getElementById('settings-fontColor');
+      const settingsFontColorHex = document.getElementById('settings-fontColor-hex');
+      const settingsBackgroundColor = document.getElementById('settings-backgroundColor');
+      const settingsBackgroundColorHex = document.getElementById('settings-backgroundColor-hex');
+      const formatFontColor = document.getElementById('format-fontColor');
+      const formatFontColorHex = document.getElementById('format-fontColor-hex');
+      const formatBackgroundColor = document.getElementById('format-backgroundColor');
+      const formatBackgroundColorHex = document.getElementById('format-backgroundColor-hex');
+      
+      // Update settings form inputs
+      if (settingsFontColor) settingsFontColor.value = defaults.fontColor;
+      if (settingsFontColorHex) settingsFontColorHex.value = defaults.fontColor;
+      if (settingsBackgroundColor) settingsBackgroundColor.value = defaults.backgroundColor;
+      if (settingsBackgroundColorHex) settingsBackgroundColorHex.value = defaults.backgroundColor;
+      
+      // Update format bar inputs
+      if (formatFontColor) formatFontColor.value = defaults.fontColor;
+      if (formatFontColorHex) formatFontColorHex.value = defaults.fontColor;
+      if (formatBackgroundColor) formatBackgroundColor.value = defaults.backgroundColor;
+      if (formatBackgroundColorHex) formatBackgroundColorHex.value = defaults.backgroundColor;
+      
+      // Apply colors immediately (even though they're disabled, we still want to show the values)
+      if (editor) {
+        // For preset themes, Monaco will handle the colors, but we can still update the display
+      }
+    }
+    
+    handleSettingChange();
+  };
+  
+  if (themeDarkRadio) {
+    themeDarkRadio.addEventListener('change', () => {
+      if (themeDarkRadio.checked) {
+        handleThemeChange('vs-dark');
+      }
+    });
+  }
+  if (themeLightRadio) {
+    themeLightRadio.addEventListener('change', () => {
+      if (themeLightRadio.checked) {
+        handleThemeChange('vs');
+      }
+    });
+  }
+  if (themeHcRadio) {
+    themeHcRadio.addEventListener('change', () => {
+      if (themeHcRadio.checked) {
+        handleThemeChange('hc-black');
+      }
+    });
+  }
+  if (themeCustomRadio) {
+    themeCustomRadio.addEventListener('change', () => {
+      if (themeCustomRadio.checked) {
+        handleThemeChange('custom');
+      }
+    });
+  }
+  
+  // Setup color picker sync (settings)
+  setupColorPickerSync('settings-fontColor', 'settings-fontColor-hex');
+  setupColorPickerSync('settings-backgroundColor', 'settings-backgroundColor-hex');
+  
   // Apply settings immediately on change (live preview)
   const inputIds = [
-    'settings-fontSize', 'settings-theme', 'settings-wordWrap',
+    'settings-fontSize', 'settings-wordWrap',
     'settings-minimap', 'settings-lineNumbers', 'settings-autoSave',
     'settings-autoSaveInterval',
+    'settings-fontColor', 'settings-backgroundColor',
+    'settings-fontColor-hex', 'settings-backgroundColor-hex',
     'settings-showChineseWordCount', 'settings-showEnglishWordCount',
     'settings-showTotalWordCount', 'settings-showCharacterCount',
     'settings-showWordCountBreakdown', 'settings-showLineCount',
     'settings-showParagraphCount',
-    'settings-showOutline', 'settings-showWordCount', 'settings-showStatusBar'
+    'settings-showOutline', 'settings-showWordCount', 'settings-showStatusBar',
+    'settings-showFormatBarBoldItalic', 'settings-showFormatBarLists', 'settings-showFormatBarColors'
   ];
   
   inputIds.forEach(id => {
@@ -926,6 +2012,9 @@ function setupSettingsForm() {
           // Apply immediately (live preview)
           applySettings(settings);
           
+          // Update preview button visibility if language mode changed
+          updatePreviewButtonVisibility();
+          
           // Update word count with preview settings immediately
           // This ensures word count options apply right away
           updateWordCount();
@@ -940,9 +2029,36 @@ function setupSettingsForm() {
 }
 
 function getSettingsFromForm() {
+  // Get language mode from radio buttons
+  const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
+  const markdownRadio = document.getElementById('settings-languageMode-markdown');
+  let languageMode = 'plaintext';
+  if (plaintextRadio && plaintextRadio.checked) languageMode = 'plaintext';
+  if (markdownRadio && markdownRadio.checked) languageMode = 'markdown';
+  
+  // Get theme from radio buttons
+  const themeDarkRadio = document.getElementById('settings-theme-dark');
+  const themeLightRadio = document.getElementById('settings-theme-light');
+  const themeHcRadio = document.getElementById('settings-theme-hc');
+  const themeCustomRadio = document.getElementById('settings-theme-custom');
+  let theme = 'vs-dark';
+  if (themeDarkRadio && themeDarkRadio.checked) theme = 'vs-dark';
+  if (themeLightRadio && themeLightRadio.checked) theme = 'vs';
+  if (themeHcRadio && themeHcRadio.checked) theme = 'hc-black';
+  if (themeCustomRadio && themeCustomRadio.checked) theme = 'custom';
+  
+  // Get colors
+  const fontColorEl = document.getElementById('settings-fontColor');
+  const backgroundColorEl = document.getElementById('settings-backgroundColor');
+  const fontColor = fontColorEl ? fontColorEl.value : '#cccccc';
+  const backgroundColor = backgroundColorEl ? backgroundColorEl.value : '#1e1e1e';
+  
   return {
+    languageMode: languageMode,
     fontSize: parseInt(document.getElementById('settings-fontSize').value),
-    theme: document.getElementById('settings-theme').value,
+    theme: theme,
+    fontColor: fontColor,
+    backgroundColor: backgroundColor,
     wordWrap: document.getElementById('settings-wordWrap').value,
     minimap: document.getElementById('settings-minimap').checked,
     lineNumbers: document.getElementById('settings-lineNumbers').checked,
@@ -960,18 +2076,92 @@ function getSettingsFromForm() {
     viewOptions: {
       showOutline: document.getElementById('settings-showOutline').checked,
       showWordCount: document.getElementById('settings-showWordCount').checked,
-      showStatusBar: document.getElementById('settings-showStatusBar').checked
+      showStatusBar: document.getElementById('settings-showStatusBar').checked,
+      showFormatBarBoldItalic: document.getElementById('settings-showFormatBarBoldItalic').checked,
+      showFormatBarLists: document.getElementById('settings-showFormatBarLists').checked,
+      showFormatBarColors: document.getElementById('settings-showFormatBarColors').checked
     }
   };
 }
 
+// Helper function to get current language mode
+function getCurrentLanguageMode() {
+  // Check current preview settings first
+  if (currentSettings && currentSettings.languageMode) {
+    return currentSettings.languageMode;
+  }
+  // Then check saved settings
+  if (originalSettings && originalSettings.languageMode) {
+    return originalSettings.languageMode;
+  }
+  // Default to plaintext
+  return 'plaintext';
+}
+
 async function applySettings(settings) {
+  // Store settings for getCurrentLanguageMode
+  if (!currentSettings) {
+    currentSettings = settings;
+  }
+  
   // Apply editor settings (only if editor exists)
   if (editor) {
-    // Apply theme separately using setTheme
-    if (settings.theme) {
+    // Apply theme - only use Monaco themes for preset themes
+    // For custom theme, we'll use custom colors instead
+    if (settings.theme && settings.theme !== 'custom') {
       monaco.editor.setTheme(settings.theme);
     }
+  }
+  
+  // Apply colors (only for custom theme, or if no theme specified)
+  if (settings.theme === 'custom') {
+    if (settings.fontColor) {
+      applyColorToEditor('fontColor', settings.fontColor);
+      // Sync to format bar
+      const formatFontColor = document.getElementById('format-fontColor');
+      const formatFontColorHex = document.getElementById('format-fontColor-hex');
+      if (formatFontColor) formatFontColor.value = settings.fontColor;
+      if (formatFontColorHex) formatFontColorHex.value = settings.fontColor;
+    }
+    if (settings.backgroundColor) {
+      applyColorToEditor('backgroundColor', settings.backgroundColor);
+      // Sync to format bar
+      const formatBackgroundColor = document.getElementById('format-backgroundColor');
+      const formatBackgroundColorHex = document.getElementById('format-backgroundColor-hex');
+      if (formatBackgroundColor) formatBackgroundColor.value = settings.backgroundColor;
+      if (formatBackgroundColorHex) formatBackgroundColorHex.value = settings.backgroundColor;
+    }
+  } else {
+    // For preset themes, remove custom color styles
+    const fontColorStyle = document.getElementById('editor-font-color-style');
+    const bgColorStyle = document.getElementById('editor-bg-color-style');
+    if (fontColorStyle) fontColorStyle.remove();
+    if (bgColorStyle) bgColorStyle.remove();
+  }
+  
+  // Apply editor settings (only if editor exists)
+  if (editor) {
+    // Apply language mode to all open tabs
+    const languageMode = settings.languageMode || 'plaintext';
+    tabs.forEach(tab => {
+      if (tab.model && !tab.isSettings) {
+        // Update the model's language
+        monaco.editor.setModelLanguage(tab.model, languageMode);
+      }
+    });
+    
+    // Update preview if switching to/from markdown
+    if (previewVisible && languageMode === 'markdown') {
+      updatePreview();
+    } else if (languageMode !== 'markdown') {
+      // Hide preview if switching away from markdown
+      if (previewVisible) {
+        togglePreviewPane();
+      }
+    }
+    
+    // Update preview button visibility
+    updatePreviewButtonVisibility();
     
     // Apply other editor options
     editor.updateOptions({
@@ -1067,6 +2257,50 @@ async function applySettings(settings) {
             mainContent.classList.add('no-status-bar');
           }
         }
+      }
+    }
+    
+    // Apply format bar visibility options
+    const boldItalicGroup = document.getElementById('format-group-bold-italic-underline');
+    const boldItalicSeparator = document.getElementById('format-separator-1');
+    const listsGroup = document.getElementById('format-group-lists');
+    const listsSeparator = document.getElementById('format-separator-2');
+    const colorsGroup = document.getElementById('format-group-colors');
+    const colorsSeparator = document.getElementById('format-separator-3');
+    
+    // Show/hide bold/italic/underline group
+    if (viewOpts.showFormatBarBoldItalic !== undefined) {
+      const show = viewOpts.showFormatBarBoldItalic;
+      if (boldItalicGroup) {
+        boldItalicGroup.style.display = show ? '' : 'none';
+      }
+      // Hide separator if group is hidden
+      if (boldItalicSeparator) {
+        boldItalicSeparator.style.display = show ? '' : 'none';
+      }
+    }
+    
+    // Show/hide lists group
+    if (viewOpts.showFormatBarLists !== undefined) {
+      const show = viewOpts.showFormatBarLists;
+      if (listsGroup) {
+        listsGroup.style.display = show ? '' : 'none';
+      }
+      // Hide separator if group is hidden
+      if (listsSeparator) {
+        listsSeparator.style.display = show ? '' : 'none';
+      }
+    }
+    
+    // Show/hide colors group
+    if (viewOpts.showFormatBarColors !== undefined) {
+      const show = viewOpts.showFormatBarColors;
+      if (colorsGroup) {
+        colorsGroup.style.display = show ? '' : 'none';
+      }
+      // Hide separator if group is hidden
+      if (colorsSeparator) {
+        colorsSeparator.style.display = show ? '' : 'none';
       }
     }
   }
@@ -1170,12 +2404,7 @@ function updateOutline() {
   });
 }
 
-// Escape HTML to prevent XSS
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is now defined in renderMarkdown function scope
 
 // Tab management functions
 function createNewTab(filePath = null, content = '') {
@@ -1241,17 +2470,29 @@ function createNewTab(filePath = null, content = '') {
   if (defaultView) defaultView.classList.add('hidden');
   if (editorContainer) editorContainer.style.display = '';
   
+  // Show format bar for new editor tab
+  showFormatBar();
+  
   // Initialize last saved content for this tab
   if (filePath) {
     lastSavedContent[tabId] = content;
   }
   
-  // Create Monaco model for this tab
+  // Create Monaco model for this tab (use language mode from settings)
   if (editor) {
-    const model = monaco.editor.createModel(content, 'plaintext');
+    // Get language mode from current settings
+    const languageMode = getCurrentLanguageMode();
+    const model = monaco.editor.createModel(content, languageMode);
     editor.setModel(model);
     tab.model = model;
+    // Update preview if visible and in markdown mode
+    if (languageMode === 'markdown' && previewVisible) {
+      updatePreview();
+    }
   }
+  
+  // Update preview button visibility
+  updatePreviewButtonVisibility();
   
   renderTabs();
   updateWordCount();
@@ -1282,6 +2523,10 @@ function switchTab(tabId) {
         setupSettingsForm();
       }
     }
+    
+    // Hide format bar for settings tab
+    hideFormatBar();
+    
     renderTabs();
     return;
   }
@@ -1308,18 +2553,35 @@ function switchTab(tabId) {
   const settingsContainer = document.getElementById('settings-container');
   const defaultView = document.getElementById('default-view');
   
+  // Show format bar for editor tabs
+  showFormatBar();
+  
   if (editorContainer) editorContainer.style.display = '';
   if (settingsContainer) settingsContainer.classList.add('hidden');
   if (defaultView) defaultView.classList.add('hidden');
   
   // Switch to tab's model
+  const languageMode = getCurrentLanguageMode();
   if (tab.model) {
+    // Ensure model has correct language mode
+    monaco.editor.setModelLanguage(tab.model, languageMode);
     editor.setModel(tab.model);
+    // Update preview if visible and in markdown mode
+    if (languageMode === 'markdown' && previewVisible) {
+      updatePreview();
+    }
   } else {
-    const model = monaco.editor.createModel(tab.content, 'plaintext');
+    const model = monaco.editor.createModel(tab.content, languageMode);
     editor.setModel(model);
     tab.model = model;
+    // Update preview if visible and in markdown mode
+    if (languageMode === 'markdown' && previewVisible) {
+      updatePreview();
+    }
   }
+  
+  // Update preview button visibility
+  updatePreviewButtonVisibility();
   
   renderTabs();
   updateWordCount();
@@ -1465,6 +2727,9 @@ function showDefaultView() {
   if (editorContainer) editorContainer.style.display = 'none';
   if (settingsContainer) settingsContainer.classList.add('hidden');
   if (defaultView) defaultView.classList.remove('hidden');
+  
+  // Hide format bar
+  hideFormatBar();
   
   renderTabs();
 }
