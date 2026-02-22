@@ -143,6 +143,30 @@ function createMenu() {
           }
         },
         { type: 'separator' },
+        {
+          label: 'Editor Mode',
+          submenu: [
+            {
+              label: 'Monaco Editor',
+              type: 'radio',
+              click: () => {
+                if (mainWindow) {
+                  mainWindow.webContents.send('menu-editor-mode', 'monaco');
+                }
+              }
+            },
+            {
+              label: 'TipTap Editor',
+              type: 'radio',
+              click: () => {
+                if (mainWindow) {
+                  mainWindow.webContents.send('menu-editor-mode', 'tiptap');
+                }
+              }
+            }
+          ]
+        },
+        { type: 'separator' },
         { role: 'toggleDevTools', label: 'Toggle Developer Tools' }
       ]
     },
@@ -343,6 +367,7 @@ ipcMain.handle('get-settings', () => {
   }
   // Return default settings
   return {
+    editorMode: 'monaco',
     fontSize: 14,
     theme: 'vs-dark',
     fontColor: '#cccccc',

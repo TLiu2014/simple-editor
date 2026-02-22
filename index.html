@@ -71,6 +71,7 @@
       </div>
       <div id="editor-wrapper" class="editor-wrapper">
         <div id="editor-container"></div>
+        <div id="tiptap-container" class="tiptap-container hidden"></div>
         <div id="preview-container" class="preview-container hidden">
           <div id="preview-content" class="preview-content"></div>
         </div>
@@ -145,6 +146,20 @@
 
           <div class="settings-section">
             <h2>Editor</h2>
+            
+            <div class="setting-item">
+              <label>Editor Mode:</label>
+              <div class="radio-group">
+                <label>
+                  <input type="radio" name="settings-editorMode" value="monaco" id="settings-editorMode-monaco">
+                  Monaco Editor
+                </label>
+                <label>
+                  <input type="radio" name="settings-editorMode" value="tiptap" id="settings-editorMode-tiptap">
+                  TipTap Editor
+                </label>
+              </div>
+            </div>
             
             <div class="setting-item">
               <label>Language Mode:</label>

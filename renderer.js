@@ -3,6 +3,8 @@ const { ipcRenderer } = (window.nodeRequire || require)('electron');
 const process = (window.nodeRequire || require)('process');
 
 let editor;
+let tiptapEditor = null;
+let editorMode = 'monaco'; // 'monaco' | 'tiptap'
 let autoSaveInterval;
 let autoSaveEnabled = true; // Auto-save is enabled by default
 let wordCountVisible = false;
@@ -147,6 +149,117 @@ function startInitialization() {
 
 startInitialization();
 
+// Editor mode helpers
+function getEditorContent() {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    return tiptapEditor.getText() || '';
+  }
+  if (editor && editor.getValue) {
+    return editor.getValue();
+  }
+  return '';
+}
+
+function plainTextToHtml(text) {
+  const s = String(text || '');
+  const escaped = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return escaped ? '<p>' + escaped.replace(/\n/g, '</p><p>') + '</p>' : '<p></p>';
+}
+
+function setActiveEditorContent(content) {
+  if (editorMode === 'tiptap') {
+    if (tiptapEditor) {
+      tiptapEditor.commands.setContent(plainTextToHtml(content), false);
+    }
+    return;
+  }
+  if (editor) {
+    const model = editor.getModel();
+    if (model) {
+      model.setValue(content || '');
+    }
+  }
+}
+
+function updateEditorContainersVisibility() {
+  const monacoEl = document.getElementById('editor-container');
+  const tiptapEl = document.getElementById('tiptap-container');
+  if (!monacoEl || !tiptapEl) return;
+  if (editorMode === 'tiptap') {
+    monacoEl.style.display = 'none';
+    monacoEl.classList.add('hidden');
+    tiptapEl.classList.remove('hidden');
+    tiptapEl.style.display = '';
+  } else {
+    tiptapEl.style.display = 'none';
+    tiptapEl.classList.add('hidden');
+    monacoEl.classList.remove('hidden');
+    monacoEl.style.display = '';
+  }
+}
+
+async function initTipTap() {
+  if (tiptapEditor) return;
+  const container = document.getElementById('tiptap-container');
+  if (!container) return;
+  try {
+    const { Editor } = await import('https://esm.sh/@tiptap/core@2.8.0');
+    const StarterKit = (await import('https://esm.sh/@tiptap/starter-kit@2.8.0')).default;
+    tiptapEditor = new Editor({
+      element: container,
+      extensions: [StarterKit],
+      content: '<p></p>',
+      editorProps: {
+        attributes: {
+          class: 'tiptap',
+          style: 'min-height: 100%; outline: none;'
+        }
+      }
+    });
+    tiptapEditor.on('update', () => {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && !activeTab.isSettings) {
+        activeTab.content = tiptapEditor.getText();
+        activeTab.modified = true;
+        updateTabTitle(activeTabId);
+      }
+      updateWordCount();
+      updateOutline();
+      if (previewVisible) updatePreview();
+    });
+    tiptapEditor.on('selectionUpdate', () => {
+      updateFormatBarState();
+    });
+  } catch (err) {
+    console.error('TipTap init failed:', err);
+  }
+}
+
+async function applyEditorMode(mode) {
+  if (mode === editorMode) return;
+  const newMode = mode === 'tiptap' ? 'tiptap' : 'monaco';
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  if (activeTab && !activeTab.isSettings) {
+    const content = getEditorContent();
+    activeTab.content = content;
+  }
+  editorMode = newMode;
+  if (editorMode === 'tiptap') {
+    await initTipTap();
+  }
+  updateEditorContainersVisibility();
+  if (activeTab && !activeTab.isSettings) {
+    setActiveEditorContent(activeTab.content);
+  }
+  if (editorMode === 'monaco' && editor) {
+    editor.focus();
+  } else if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.commands.focus();
+  }
+  updateWordCount();
+  updateOutline();
+}
+
 // Auto-save functions
 async function startAutoSave() {
   if (autoSaveInterval) {
@@ -159,12 +272,11 @@ async function startAutoSave() {
     const interval = settings.autoSaveInterval || 1000; // Default to 1 second
     
     autoSaveInterval = setInterval(() => {
-      if (!editor || !activeTabId) return;
-      
+      if (!activeTabId) return;
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (!activeTab || !activeTab.filePath) return;
       
-      const content = editor.getValue();
+      const content = getEditorContent();
       const lastSaved = lastSavedContent[activeTabId] || '';
       
       // Only save if content has actually changed from last saved version
@@ -398,10 +510,8 @@ function formatWordCount(counts, options = {}) {
 }
 
 function updateWordCount() {
-  if (!editor) return;
-
-  const content = editor.getValue();
-  const counts = countWords(content);
+  const content = getEditorContent();
+  const counts = countWords(content || '');
   
   // Use current preview settings if available (when settings tab is open), otherwise get from disk
   if (currentSettings && currentSettings.wordCountOptions) {
@@ -462,12 +572,12 @@ function setupEventListeners() {
   });
 
   ipcRenderer.on('menu-save-file', async () => {
-    if (!activeTabId || !editor) return;
+    if (!activeTabId) return;
     
     const activeTab = tabs.find(t => t.id === activeTabId);
-    if (!activeTab) return;
+    if (!activeTab || activeTab.isSettings) return;
     
-    const content = editor.getValue();
+    const content = getEditorContent();
     
     // Show saving indicator
     showSaveIndicator('saving');
@@ -584,6 +694,20 @@ function setupEventListeners() {
 
   ipcRenderer.on('menu-open-settings', () => {
     openSettingsTab();
+  });
+
+  ipcRenderer.on('menu-editor-mode', async (event, mode) => {
+    if (mode !== 'monaco' && mode !== 'tiptap') return;
+    await applyEditorMode(mode);
+    const saved = await ipcRenderer.invoke('get-settings');
+    const merged = { ...saved, editorMode: mode };
+    await ipcRenderer.invoke('save-settings', merged);
+    originalSettings = merged;
+    if (currentSettings) currentSettings.editorMode = mode;
+    const monacoRadio = document.getElementById('settings-editorMode-monaco');
+    const tiptapRadio = document.getElementById('settings-editorMode-tiptap');
+    if (monacoRadio) monacoRadio.checked = (mode === 'monaco');
+    if (tiptapRadio) tiptapRadio.checked = (mode === 'tiptap');
   });
 
   // Listen for settings updates
@@ -781,6 +905,15 @@ function replaceText(start, end, newText, selectNewText = false) {
 }
 
 function applyFormatStyle(style) {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.chain().focus();
+    if (style === 'normal') tiptapEditor.commands.setParagraph();
+    else if (style === 'title' || style === 'h1') tiptapEditor.commands.setHeading({ level: 1 });
+    else if (style === 'h2') tiptapEditor.commands.setHeading({ level: 2 });
+    else if (style === 'h3') tiptapEditor.commands.setHeading({ level: 3 });
+    updateFormatBarState();
+    return;
+  }
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -851,6 +984,11 @@ function applyFormatStyle(style) {
 }
 
 function applyBold() {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.chain().focus().toggleBold().run();
+    updateFormatBarState();
+    return;
+  }
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -858,10 +996,8 @@ function applyBold() {
   const isBold = text.startsWith('**') && text.endsWith('**') && text.length > 4;
   
   if (isBold) {
-    // Remove bold
     text = text.slice(2, -2);
   } else {
-    // Add bold
     text = `**${text}**`;
   }
   
@@ -870,6 +1006,11 @@ function applyBold() {
 }
 
 function applyItalic() {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.chain().focus().toggleItalic().run();
+    updateFormatBarState();
+    return;
+  }
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -890,6 +1031,7 @@ function applyItalic() {
 }
 
 function applyUnderline() {
+  if (editorMode === 'tiptap' && tiptapEditor) return;
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -911,6 +1053,11 @@ function applyUnderline() {
 }
 
 function applyBulletList() {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.chain().focus().toggleBulletList().run();
+    updateFormatBarState();
+    return;
+  }
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -931,6 +1078,11 @@ function applyBulletList() {
 }
 
 function applyNumberedList() {
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    tiptapEditor.chain().focus().toggleOrderedList().run();
+    updateFormatBarState();
+    return;
+  }
   const selected = getSelectedText();
   if (!selected.text && !selected.isLine) return;
   
@@ -956,15 +1108,28 @@ function applyNumberedList() {
 }
 
 function updateFormatBarState() {
-  if (!editor) return;
-  
-  const selected = getSelectedText();
   const formatStyle = document.getElementById('format-style');
   const formatBold = document.getElementById('format-bold');
   const formatItalic = document.getElementById('format-italic');
   const formatUnderline = document.getElementById('format-underline');
   
-  // Update style dropdown
+  if (editorMode === 'tiptap' && tiptapEditor) {
+    if (formatBold) formatBold.classList.toggle('active', tiptapEditor.isActive('bold'));
+    if (formatItalic) formatItalic.classList.toggle('active', tiptapEditor.isActive('italic'));
+    if (formatUnderline) formatUnderline.classList.remove('active');
+    if (formatStyle) {
+      if (tiptapEditor.isActive('heading', { level: 1 })) formatStyle.value = 'h1';
+      else if (tiptapEditor.isActive('heading', { level: 2 })) formatStyle.value = 'h2';
+      else if (tiptapEditor.isActive('heading', { level: 3 })) formatStyle.value = 'h3';
+      else formatStyle.value = 'normal';
+    }
+    return;
+  }
+  
+  if (!editor) return;
+  
+  const selected = getSelectedText();
+  
   if (formatStyle && selected.text) {
     const text = selected.text.trim();
     if (text.startsWith('### ')) {
@@ -1339,12 +1504,14 @@ function togglePreviewPane() {
 }
 
 function updatePreview() {
-  if (!previewVisible || !editor) return;
+  if (!previewVisible) return;
+  const content = getEditorContent();
+  if (content === undefined) return;
   
   const previewContent = document.getElementById('preview-content');
   if (!previewContent) return;
   
-  const markdown = editor.getValue();
+  const markdown = content || '';
   const html = renderMarkdown(markdown);
   previewContent.innerHTML = html;
   
@@ -1685,7 +1852,12 @@ function loadSettingsIntoForm() {
 }
 
 function loadFormValues(settings) {
-  // Load editor settings into form
+  const editorModeVal = settings.editorMode || 'monaco';
+  const editorModeMonacoRadio = document.getElementById('settings-editorMode-monaco');
+  const editorModeTiptapRadio = document.getElementById('settings-editorMode-tiptap');
+  if (editorModeMonacoRadio) editorModeMonacoRadio.checked = (editorModeVal === 'monaco');
+  if (editorModeTiptapRadio) editorModeTiptapRadio.checked = (editorModeVal === 'tiptap');
+  
   const languageMode = settings.languageMode || 'plaintext';
   const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
   const markdownRadio = document.getElementById('settings-languageMode-markdown');
@@ -2029,7 +2201,12 @@ function setupSettingsForm() {
 }
 
 function getSettingsFromForm() {
-  // Get language mode from radio buttons
+  const editorModeMonacoRadio = document.getElementById('settings-editorMode-monaco');
+  const editorModeTiptapRadio = document.getElementById('settings-editorMode-tiptap');
+  let editorModeVal = 'monaco';
+  if (editorModeTiptapRadio && editorModeTiptapRadio.checked) editorModeVal = 'tiptap';
+  if (editorModeMonacoRadio && editorModeMonacoRadio.checked) editorModeVal = 'monaco';
+  
   const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
   const markdownRadio = document.getElementById('settings-languageMode-markdown');
   let languageMode = 'plaintext';
@@ -2054,6 +2231,7 @@ function getSettingsFromForm() {
   const backgroundColor = backgroundColorEl ? backgroundColorEl.value : '#1e1e1e';
   
   return {
+    editorMode: editorModeVal,
     languageMode: languageMode,
     fontSize: parseInt(document.getElementById('settings-fontSize').value),
     theme: theme,
@@ -2099,12 +2277,18 @@ function getCurrentLanguageMode() {
 }
 
 async function applySettings(settings) {
-  // Store settings for getCurrentLanguageMode
   if (!currentSettings) {
     currentSettings = settings;
   }
   
-  // Apply editor settings (only if editor exists)
+  const newEditorMode = settings.editorMode || 'monaco';
+  if (newEditorMode !== editorMode) {
+    await applyEditorMode(newEditorMode);
+  } else {
+    editorMode = newEditorMode;
+    updateEditorContainersVisibility();
+  }
+  
   if (editor) {
     // Apply theme - only use Monaco themes for preset themes
     // For custom theme, we'll use custom colors instead
@@ -2369,10 +2553,11 @@ function parseHeadings(content) {
 
 // Update outline panel
 function updateOutline() {
-  if (!editor) return;
+  const content = getEditorContent();
+  if (content === undefined) return;
   
-  const content = editor.getValue();
-  const headings = parseHeadings(content);
+  const text = content || '';
+  const headings = parseHeadings(text);
   outlineItems = headings;
   
   const outlineContent = document.getElementById('outline-content');
@@ -2387,16 +2572,15 @@ function updateOutline() {
     return `<div class="outline-item h${heading.level}" data-line="${heading.line}" data-index="${index}">${escapeHtml(heading.text)}</div>`;
   }).join('');
   
-  // Add click handlers
+  // Add click handlers (Monaco only - outline line navigation)
   outlineContent.querySelectorAll('.outline-item').forEach(item => {
     item.addEventListener('click', () => {
+      if (editorMode === 'tiptap') return;
       const line = parseInt(item.getAttribute('data-line'));
       if (editor && line > 0) {
         editor.setPosition({ lineNumber: line, column: 1 });
         editor.revealLineInCenter(line);
         editor.focus();
-        
-        // Update active state
         outlineContent.querySelectorAll('.outline-item').forEach(i => i.classList.remove('active'));
         item.classList.add('active');
       }
@@ -2466,9 +2650,8 @@ function createNewTab(filePath = null, content = '') {
   
   // Hide default view, show editor
   const defaultView = document.getElementById('default-view');
-  const editorContainer = document.getElementById('editor-container');
   if (defaultView) defaultView.classList.add('hidden');
-  if (editorContainer) editorContainer.style.display = '';
+  updateEditorContainersVisibility();
   
   // Show format bar for new editor tab
   showFormatBar();
@@ -2478,17 +2661,20 @@ function createNewTab(filePath = null, content = '') {
     lastSavedContent[tabId] = content;
   }
   
-  // Create Monaco model for this tab (use language mode from settings)
-  if (editor) {
-    // Get language mode from current settings
+  if (editorMode === 'monaco' && editor) {
     const languageMode = getCurrentLanguageMode();
     const model = monaco.editor.createModel(content, languageMode);
     editor.setModel(model);
     tab.model = model;
-    // Update preview if visible and in markdown mode
     if (languageMode === 'markdown' && previewVisible) {
       updatePreview();
     }
+    setTimeout(() => editor.focus(), 100);
+  } else if (editorMode === 'tiptap') {
+    initTipTap().then(() => {
+      setActiveEditorContent(content);
+      if (tiptapEditor) tiptapEditor.commands.focus();
+    });
   }
   
   // Update preview button visibility
@@ -2497,10 +2683,6 @@ function createNewTab(filePath = null, content = '') {
   renderTabs();
   updateWordCount();
   updateOutline();
-  
-  if (editor) {
-    setTimeout(() => editor.focus(), 100);
-  }
   
   return tabId;
 }
@@ -2513,9 +2695,11 @@ function switchTab(tabId) {
   if (tab.isSettings) {
     activeTabId = tabId;
     const editorContainer = document.getElementById('editor-container');
+    const tiptapContainer = document.getElementById('tiptap-container');
     const settingsContainer = document.getElementById('settings-container');
     
     if (editorContainer) editorContainer.style.display = 'none';
+    if (tiptapContainer) { tiptapContainer.style.display = 'none'; tiptapContainer.classList.add('hidden'); }
     if (settingsContainer) {
       settingsContainer.classList.remove('hidden');
       if (!originalSettings) {
@@ -2524,22 +2708,19 @@ function switchTab(tabId) {
       }
     }
     
-    // Hide format bar for settings tab
     hideFormatBar();
-    
     renderTabs();
     return;
   }
   
-  if (!editor) return;
+  if (editorMode === 'monaco' && !editor) return;
   
   // Save current tab content
   if (activeTabId) {
     const currentTab = tabs.find(t => t.id === activeTabId);
     if (currentTab && !currentTab.isSettings) {
-      const content = editor.getValue();
+      const content = getEditorContent();
       currentTab.content = content;
-      // Update last saved content if tab has a file path
       if (currentTab.filePath) {
         lastSavedContent[activeTabId] = content;
       }
@@ -2548,45 +2729,38 @@ function switchTab(tabId) {
   
   activeTabId = tabId;
   
-  // Hide settings and default view, show editor
-  const editorContainer = document.getElementById('editor-container');
   const settingsContainer = document.getElementById('settings-container');
   const defaultView = document.getElementById('default-view');
   
-  // Show format bar for editor tabs
   showFormatBar();
-  
-  if (editorContainer) editorContainer.style.display = '';
+  updateEditorContainersVisibility();
   if (settingsContainer) settingsContainer.classList.add('hidden');
   if (defaultView) defaultView.classList.add('hidden');
   
-  // Switch to tab's model
-  const languageMode = getCurrentLanguageMode();
-  if (tab.model) {
-    // Ensure model has correct language mode
-    monaco.editor.setModelLanguage(tab.model, languageMode);
-    editor.setModel(tab.model);
-    // Update preview if visible and in markdown mode
-    if (languageMode === 'markdown' && previewVisible) {
-      updatePreview();
+  if (editorMode === 'monaco' && editor) {
+    const languageMode = getCurrentLanguageMode();
+    if (tab.model) {
+      monaco.editor.setModelLanguage(tab.model, languageMode);
+      editor.setModel(tab.model);
+      if (languageMode === 'markdown' && previewVisible) updatePreview();
+    } else {
+      const model = monaco.editor.createModel(tab.content, languageMode);
+      editor.setModel(model);
+      tab.model = model;
+      if (languageMode === 'markdown' && previewVisible) updatePreview();
     }
-  } else {
-    const model = monaco.editor.createModel(tab.content, languageMode);
-    editor.setModel(model);
-    tab.model = model;
-    // Update preview if visible and in markdown mode
-    if (languageMode === 'markdown' && previewVisible) {
-      updatePreview();
-    }
+    editor.focus();
+  } else if (editorMode === 'tiptap') {
+    initTipTap().then(() => {
+      setActiveEditorContent(tab.content);
+      if (tiptapEditor) tiptapEditor.commands.focus();
+    });
   }
   
-  // Update preview button visibility
   updatePreviewButtonVisibility();
-  
   renderTabs();
   updateWordCount();
   updateOutline();
-  editor.focus();
 }
 
 function closeTab(tabId) {
@@ -2624,10 +2798,7 @@ function closeTab(tabId) {
     if (settingsContainer) {
       settingsContainer.classList.add('hidden');
     }
-    const editorContainer = document.getElementById('editor-container');
-    if (editorContainer) {
-      editorContainer.style.display = '';
-    }
+    updateEditorContainersVisibility();
   }
   
   // Dispose Monaco model (only for editor tabs)
@@ -2719,18 +2890,17 @@ function updateTabTitle(tabId) {
 function showDefaultView() {
   activeTabId = null;
   
-  // Hide editor and settings, show default view
   const editorContainer = document.getElementById('editor-container');
+  const tiptapContainer = document.getElementById('tiptap-container');
   const settingsContainer = document.getElementById('settings-container');
   const defaultView = document.getElementById('default-view');
   
   if (editorContainer) editorContainer.style.display = 'none';
+  if (tiptapContainer) { tiptapContainer.style.display = 'none'; tiptapContainer.classList.add('hidden'); }
   if (settingsContainer) settingsContainer.classList.add('hidden');
   if (defaultView) defaultView.classList.remove('hidden');
   
-  // Hide format bar
   hideFormatBar();
-  
   renderTabs();
 }
 
@@ -2788,18 +2958,15 @@ async function restoreOpenFiles() {
 
 // Cleanup on window close
 window.addEventListener('beforeunload', () => {
-  // Save current tab content
-  if (activeTabId && editor) {
+  if (activeTabId) {
     const activeTab = tabs.find(t => t.id === activeTabId);
-    if (activeTab) {
-      activeTab.content = editor.getValue();
+    if (activeTab && !activeTab.isSettings) {
+      activeTab.content = getEditorContent();
     }
   }
   
-  // Save open files list
   saveOpenFiles();
   
-  // Dispose all models
   tabs.forEach(tab => {
     if (tab.model) {
       tab.model.dispose();
@@ -2807,7 +2974,9 @@ window.addEventListener('beforeunload', () => {
   });
   
   stopAutoSave();
-  if (editor) {
-    editor.dispose();
+  if (editor) editor.dispose();
+  if (tiptapEditor) {
+    tiptapEditor.destroy();
+    tiptapEditor = null;
   }
 });
