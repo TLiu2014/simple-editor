@@ -34,6 +34,29 @@ function createWindow() {
 
   mainWindow.loadFile('index.html');
 
+  mainWindow.on('close', async (e) => {
+    try {
+      const hasUnsaved = await mainWindow.webContents.executeJavaScript('window.hasUnsavedSettingsChanges ? window.hasUnsavedSettingsChanges() : false');
+      if (!hasUnsaved) return;
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        title: 'Unsaved Settings',
+        message: 'You have unsaved settings changes. Do you want to save them?',
+        buttons: ['Save', "Don't Save", 'Cancel'],
+        defaultId: 0,
+        cancelId: 2
+      });
+      if (response === 0) {
+        await mainWindow.webContents.executeJavaScript('window.saveSettingsFromForm ? window.saveSettingsFromForm() : Promise.resolve()');
+      }
+      if (response === 2) {
+        e.preventDefault();
+      }
+    } catch (err) {
+      console.error('Close handler error:', err);
+    }
+  });
+
   // Open DevTools in development (temporarily enabled for debugging)
   mainWindow.webContents.openDevTools();
 }
@@ -401,7 +424,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-    // Notify main window to update settings
     if (mainWindow) {
       mainWindow.webContents.send('settings-updated', settings);
     }
@@ -409,4 +431,17 @@ ipcMain.handle('save-settings', async (event, settings) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('show-unsaved-settings-dialog', async () => {
+  if (!mainWindow) return 2;
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Unsaved Settings',
+    message: 'You have unsaved settings changes. Do you want to save them?',
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2
+  });
+  return response;
 });

@@ -4,7 +4,36 @@
   box-sizing: border-box;
 }
 
-/* Settings styles for embedded tab */
+/* Settings saved notification (auto-dismiss) */
+.settings-saved-notification {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 10px 16px;
+  background-color: #0e639c;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: settings-saved-fade-in 0.25s ease;
+}
+
+.settings-saved-notification.hidden {
+  display: none;
+}
+
+@keyframes settings-saved-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .settings-content {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   background-color: #1e1e1e;
@@ -135,6 +164,27 @@
   display: flex;
   align-items: center;
   cursor: pointer;
+}
+
+.setting-hint {
+  font-size: 12px;
+  color: #888888;
+}
+
+.setting-hint.hidden {
+  display: none;
+}
+
+.setting-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+#settings-languageMode-wrap.disabled .radio-group {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .radio-group {

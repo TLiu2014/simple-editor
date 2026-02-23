@@ -5,6 +5,7 @@ const process = (window.nodeRequire || require)('process');
 let editor;
 let tiptapEditor = null;
 let editorMode = 'monaco'; // 'monaco' | 'tiptap'
+let suppressContentSyncOnce = false; // when true, next TipTap update won't overwrite tab.content (preserves text when switching mode)
 let autoSaveInterval;
 let autoSaveEnabled = true; // Auto-save is enabled by default
 let wordCountVisible = false;
@@ -152,7 +153,41 @@ startInitialization();
 // Editor mode helpers
 function getEditorContent() {
   if (editorMode === 'tiptap' && tiptapEditor) {
-    return tiptapEditor.getText() || '';
+    try {
+      const isMarkdown = getCurrentLanguageMode() === 'markdown';
+      if (isMarkdown) {
+        if (typeof tiptapEditor.getMarkdown === 'function') {
+          try {
+            const markdown = tiptapEditor.getMarkdown();
+            if (typeof markdown === 'string' && markdown.length > 0) return markdown;
+            const textFallback = getTipTapPlainText();
+            if (typeof textFallback === 'string' && textFallback.length > 0) return textFallback;
+            if (typeof markdown === 'string') return markdown;
+          } catch (e) {
+            console.warn('TipTap getMarkdown failed, falling back to text:', e);
+          }
+        }
+        if (tiptapEditor.markdown && typeof tiptapEditor.markdown.serialize === 'function') {
+          try {
+            const markdown = tiptapEditor.markdown.serialize(tiptapEditor.state.doc);
+            if (typeof markdown === 'string' && markdown.length > 0) return markdown;
+            const textFallback = getTipTapPlainText();
+            if (typeof textFallback === 'string' && textFallback.length > 0) return textFallback;
+            if (typeof markdown === 'string') return markdown;
+          } catch (e) {
+            console.warn('TipTap markdown serialization failed, falling back to text:', e);
+          }
+        }
+      }
+      return getTipTapPlainText();
+    } catch (e) {
+      console.warn('TipTap content read failed:', e);
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && !activeTab.isSettings && typeof activeTab.content === 'string') {
+        return activeTab.content;
+      }
+      return '';
+    }
   }
   if (editor && editor.getValue) {
     return editor.getValue();
@@ -166,10 +201,29 @@ function plainTextToHtml(text) {
   return escaped ? '<p>' + escaped.replace(/\n/g, '</p><p>') + '</p>' : '<p></p>';
 }
 
+function getTipTapPlainText() {
+  if (!tiptapEditor || typeof tiptapEditor.getText !== 'function') return '';
+  try {
+    return tiptapEditor.getText({ blockSeparator: '\n' }) || '';
+  } catch (e) {
+    return tiptapEditor.getText() || '';
+  }
+}
+
 function setActiveEditorContent(content) {
   if (editorMode === 'tiptap') {
     if (tiptapEditor) {
-      tiptapEditor.commands.setContent(plainTextToHtml(content), false);
+      suppressContentSyncOnce = true;
+      try {
+        tiptapEditor.commands.setContent(plainTextToHtml(content), false);
+      } catch (e) {
+        console.warn('TipTap setContent failed, resetting editor content:', e);
+        try {
+          tiptapEditor.commands.setContent('<p></p>', false);
+        } catch (e2) {
+          console.error('TipTap fallback setContent failed:', e2);
+        }
+      }
     }
     return;
   }
@@ -198,6 +252,18 @@ function updateEditorContainersVisibility() {
   }
 }
 
+function relayoutMonacoAfterShow() {
+  if (!editor || editorMode !== 'monaco') return;
+  requestAnimationFrame(() => {
+    try {
+      editor.layout();
+      editor.focus();
+    } catch (e) {
+      console.warn('Monaco relayout failed:', e);
+    }
+  });
+}
+
 async function initTipTap() {
   if (tiptapEditor) return;
   const container = document.getElementById('tiptap-container');
@@ -205,9 +271,49 @@ async function initTipTap() {
   try {
     const { Editor } = await import('https://esm.sh/@tiptap/core@2.8.0');
     const StarterKit = (await import('https://esm.sh/@tiptap/starter-kit@2.8.0')).default;
+    let Markdown = null;
+    try {
+      const markdownModule = await import('https://esm.sh/@tiptap/extension-markdown@2.8.0');
+      Markdown = markdownModule.Markdown || markdownModule.default;
+    } catch (e0) {
+      try {
+        const markdownModule = await import('https://esm.sh/@tiptap/markdown');
+        Markdown = markdownModule.Markdown || markdownModule.default;
+      } catch (e) {
+        try {
+          const markdownModule = await import('https://esm.sh/tiptap-markdown');
+          Markdown = markdownModule.Markdown || markdownModule.default;
+        } catch (e2) {
+          console.warn('TipTap Markdown extension not loaded, using plain text only:', e0.message || e.message);
+        }
+      }
+    }
+
+    let markdownExtension = null;
+    if (Markdown) {
+      try {
+        if (typeof Markdown.configure === 'function') {
+          markdownExtension = Markdown.configure({
+            html: false,
+            transformPastedText: true
+          });
+        } else if (typeof Markdown === 'function') {
+          markdownExtension = Markdown();
+        } else {
+          markdownExtension = Markdown;
+        }
+      } catch (e) {
+        try {
+          markdownExtension = new Markdown();
+        } catch (e2) {
+          console.warn('TipTap Markdown extension instance creation failed, using plain text only:', e2.message || e.message);
+        }
+      }
+    }
+    const extensions = markdownExtension ? [StarterKit, markdownExtension] : [StarterKit];
     tiptapEditor = new Editor({
       element: container,
-      extensions: [StarterKit],
+      extensions,
       content: '<p></p>',
       editorProps: {
         attributes: {
@@ -217,9 +323,33 @@ async function initTipTap() {
       }
     });
     tiptapEditor.on('update', () => {
+      if (suppressContentSyncOnce) {
+        suppressContentSyncOnce = false;
+        updateWordCount();
+        updateOutline();
+        if (previewVisible) updatePreview();
+        return;
+      }
       const activeTab = tabs.find(t => t.id === activeTabId);
       if (activeTab && !activeTab.isSettings) {
-        activeTab.content = tiptapEditor.getText();
+        const isMarkdown = getCurrentLanguageMode() === 'markdown';
+        if (isMarkdown && typeof tiptapEditor.getMarkdown === 'function') {
+          try {
+            activeTab.content = tiptapEditor.getMarkdown() || getTipTapPlainText() || '';
+          } catch (e) {
+            console.warn('TipTap getMarkdown on update failed, using text fallback:', e);
+            activeTab.content = getTipTapPlainText() || '';
+          }
+        } else if (isMarkdown && tiptapEditor.markdown && typeof tiptapEditor.markdown.serialize === 'function') {
+          try {
+            activeTab.content = tiptapEditor.markdown.serialize(tiptapEditor.state.doc) || getTipTapPlainText() || '';
+          } catch (e) {
+            console.warn('TipTap markdown serialize on update failed, using text fallback:', e);
+            activeTab.content = getTipTapPlainText() || '';
+          }
+        } else {
+          activeTab.content = getTipTapPlainText() || '';
+        }
         activeTab.modified = true;
         updateTabTitle(activeTabId);
       }
@@ -240,24 +370,73 @@ async function applyEditorMode(mode) {
   const newMode = mode === 'tiptap' ? 'tiptap' : 'monaco';
   const activeTab = tabs.find(t => t.id === activeTabId);
   if (activeTab && !activeTab.isSettings) {
-    const content = getEditorContent();
-    activeTab.content = content;
+    if (editorMode === 'monaco' && editor) {
+      const model = editor.getModel();
+      if (model && activeTab.model === model) {
+        activeTab.content = editor.getValue();
+      }
+    } else if (editorMode === 'tiptap' && tiptapEditor) {
+      const content = getEditorContent();
+      if (content !== undefined && content !== null) {
+        const next = String(content).trim();
+        const existing = String(activeTab.content || '').trim();
+        if (next.length > 0 || existing.length === 0) {
+          activeTab.content = content;
+        }
+      }
+    }
   }
   editorMode = newMode;
-  if (editorMode === 'tiptap') {
-    await initTipTap();
-  }
+  updateEditorModeIndicator();
   updateEditorContainersVisibility();
+
   if (activeTab && !activeTab.isSettings) {
-    setActiveEditorContent(activeTab.content);
+    if (editorMode === 'monaco' && editor) {
+      const languageMode = getCurrentLanguageMode();
+      if (activeTab.model) {
+        monaco.editor.setModelLanguage(activeTab.model, languageMode);
+        activeTab.model.setValue(activeTab.content || '');
+        editor.setModel(activeTab.model);
+      } else {
+        const model = monaco.editor.createModel(activeTab.content || '', languageMode);
+        editor.setModel(model);
+        activeTab.model = model;
+      }
+      relayoutMonacoAfterShow();
+      if (languageMode === 'markdown' && previewVisible) updatePreview();
+    } else if (editorMode === 'tiptap') {
+      await initTipTap();
+      if (!tiptapEditor) {
+        console.error('TipTap failed to initialize, reverting to Monaco');
+        editorMode = 'monaco';
+        updateEditorModeIndicator();
+        updateEditorContainersVisibility();
+        if (editor && activeTab.model) {
+          editor.setModel(activeTab.model);
+          editor.focus();
+        }
+        updatePreviewButtonVisibility();
+        return;
+      }
+      suppressContentSyncOnce = true;
+      setActiveEditorContent(activeTab.content);
+      if (tiptapEditor) tiptapEditor.commands.focus();
+      if (getCurrentLanguageMode() === 'markdown' && previewVisible) {
+        requestAnimationFrame(() => updatePreview());
+      }
+    }
   }
-  if (editorMode === 'monaco' && editor) {
-    editor.focus();
-  } else if (editorMode === 'tiptap' && tiptapEditor) {
-    tiptapEditor.commands.focus();
-  }
+  updatePreviewButtonVisibility();
   updateWordCount();
   updateOutline();
+}
+
+function updateEditorModeIndicator() {
+  const label = editorMode === 'tiptap' ? 'TipTap' : 'Monaco';
+  const formatEl = document.getElementById('editor-mode-indicator');
+  const statusEl = document.getElementById('status-editor-mode');
+  if (formatEl) formatEl.textContent = label;
+  if (statusEl) statusEl.textContent = 'Editor: ' + label;
 }
 
 // Auto-save functions
@@ -565,8 +744,12 @@ function setupEventListeners() {
     createNewTab();
   });
   
-  ipcRenderer.on('menu-close-tab', () => {
-    if (activeTabId) {
+  ipcRenderer.on('menu-close-tab', async () => {
+    if (!activeTabId) return;
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (tab && tab.isSettings) {
+      await tryCloseSettingsTab();
+    } else {
       closeTab(activeTabId);
     }
   });
@@ -575,7 +758,24 @@ function setupEventListeners() {
     if (!activeTabId) return;
     
     const activeTab = tabs.find(t => t.id === activeTabId);
-    if (!activeTab || activeTab.isSettings) return;
+    if (!activeTab) return;
+    
+    if (activeTab.isSettings) {
+      const settings = getSettingsFromForm();
+      const result = await ipcRenderer.invoke('save-settings', settings);
+      if (result.success) {
+        originalSettings = JSON.parse(JSON.stringify(settings));
+        currentSettings = null;
+        const settingsTab = tabs.find(t => t.id === settingsTabId);
+        if (settingsTab) {
+          settingsTab.modified = false;
+          renderTabs();
+        }
+        updateWordCount();
+        showSettingsSavedNotification();
+      }
+      return;
+    }
     
     const content = getEditorContent();
     
@@ -723,7 +923,22 @@ function setupEventListeners() {
 
 // Format bar functions
 function setupFormatBarListeners() {
-  // Setup listeners even if editor isn't ready yet - they'll work when editor is available
+  const editorModeEl = document.getElementById('editor-mode-indicator');
+  if (editorModeEl) {
+    editorModeEl.addEventListener('click', async () => {
+      const nextMode = editorMode === 'monaco' ? 'tiptap' : 'monaco';
+      await applyEditorMode(nextMode);
+      const saved = await ipcRenderer.invoke('get-settings');
+      const merged = { ...saved, editorMode: nextMode };
+      await ipcRenderer.invoke('save-settings', merged);
+      originalSettings = merged;
+      if (currentSettings) currentSettings.editorMode = nextMode;
+      const monacoRadio = document.getElementById('settings-editorMode-monaco');
+      const tiptapRadio = document.getElementById('settings-editorMode-tiptap');
+      if (monacoRadio) monacoRadio.checked = (nextMode === 'monaco');
+      if (tiptapRadio) tiptapRadio.checked = (nextMode === 'tiptap');
+    });
+  }
 
   // Format style dropdown
   const formatStyle = document.getElementById('format-style');
@@ -1505,9 +1720,12 @@ function togglePreviewPane() {
 
 function updatePreview() {
   if (!previewVisible) return;
-  const content = getEditorContent();
-  if (content === undefined) return;
-  
+  let content = getEditorContent();
+  if (content === undefined) content = '';
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  if ((content === '' || content === undefined) && activeTab && !activeTab.isSettings && typeof activeTab.content === 'string') {
+    content = activeTab.content;
+  }
   const previewContent = document.getElementById('preview-content');
   if (!previewContent) return;
   
@@ -1515,7 +1733,6 @@ function updatePreview() {
   const html = renderMarkdown(markdown);
   previewContent.innerHTML = html;
   
-  // Sync scroll position (optional - can be enhanced)
   syncPreviewScroll();
 }
 
@@ -1742,6 +1959,22 @@ async function loadSettings() {
   }
 }
 
+let settingsSavedNotificationTimeout = null;
+
+function showSettingsSavedNotification() {
+  const el = document.getElementById('settings-saved-notification');
+  if (!el) return;
+  if (settingsSavedNotificationTimeout) {
+    clearTimeout(settingsSavedNotificationTimeout);
+    settingsSavedNotificationTimeout = null;
+  }
+  el.classList.remove('hidden');
+  settingsSavedNotificationTimeout = setTimeout(() => {
+    el.classList.add('hidden');
+    settingsSavedNotificationTimeout = null;
+  }, 2500);
+}
+
 // Settings tab management
 function openSettingsTab() {
   // Check if settings tab already exists
@@ -1851,12 +2084,53 @@ function loadSettingsIntoForm() {
   });
 }
 
+function hasUnsavedSettingsChanges() {
+  if (!settingsTabId || !originalSettings) return false;
+  try {
+    const current = getSettingsFromForm();
+    return JSON.stringify(current) !== JSON.stringify(originalSettings);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function tryCloseSettingsTab() {
+  if (!settingsTabId) return;
+  if (!hasUnsavedSettingsChanges()) {
+    closeTab(settingsTabId);
+    return;
+  }
+  const choice = await ipcRenderer.invoke('show-unsaved-settings-dialog');
+  if (choice === 0) {
+    const settings = getSettingsFromForm();
+    await ipcRenderer.invoke('save-settings', settings);
+    originalSettings = settings;
+    if (currentSettings) currentSettings = settings;
+    closeTab(settingsTabId);
+  } else if (choice === 1) {
+    closeTab(settingsTabId);
+  }
+}
+
+function updateSettingsLanguageModeSection(mode) {
+  const wrap = document.getElementById('settings-languageMode-wrap');
+  const hint = document.getElementById('settings-languageMode-hint');
+  const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
+  const markdownRadio = document.getElementById('settings-languageMode-markdown');
+  if (!wrap) return;
+  wrap.classList.remove('disabled');
+  if (hint) hint.classList.add('hidden');
+  if (plaintextRadio) plaintextRadio.disabled = false;
+  if (markdownRadio) markdownRadio.disabled = false;
+}
+
 function loadFormValues(settings) {
   const editorModeVal = settings.editorMode || 'monaco';
   const editorModeMonacoRadio = document.getElementById('settings-editorMode-monaco');
   const editorModeTiptapRadio = document.getElementById('settings-editorMode-tiptap');
   if (editorModeMonacoRadio) editorModeMonacoRadio.checked = (editorModeVal === 'monaco');
   if (editorModeTiptapRadio) editorModeTiptapRadio.checked = (editorModeVal === 'tiptap');
+  updateSettingsLanguageModeSection(editorModeVal);
   
   const languageMode = settings.languageMode || 'plaintext';
   const plaintextRadio = document.getElementById('settings-languageMode-plaintext');
@@ -1988,8 +2262,7 @@ function setupSettingsForm() {
         // Update word count with newly saved settings
         updateWordCount();
         
-        // Settings are now saved, close the tab
-        closeSettingsTab();
+        showSettingsSavedNotification();
       }
     });
   }
@@ -2046,6 +2319,15 @@ function setupSettingsForm() {
       }
     });
   }
+  
+  const editorModeMonacoRadio = document.getElementById('settings-editorMode-monaco');
+  const editorModeTiptapRadio = document.getElementById('settings-editorMode-tiptap');
+  const updateLanguageModeSectionFromForm = () => {
+    const val = editorModeTiptapRadio && editorModeTiptapRadio.checked ? 'tiptap' : 'monaco';
+    updateSettingsLanguageModeSection(val);
+  };
+  if (editorModeMonacoRadio) editorModeMonacoRadio.addEventListener('change', updateLanguageModeSectionFromForm);
+  if (editorModeTiptapRadio) editorModeTiptapRadio.addEventListener('change', updateLanguageModeSectionFromForm);
   
   // Setup theme radio buttons
   const themeDarkRadio = document.getElementById('settings-theme-dark');
@@ -2488,6 +2770,8 @@ async function applySettings(settings) {
       }
     }
   }
+  
+  updateEditorModeIndicator();
 }
 
 // Don't setup event listeners immediately - wait for editor to be ready
@@ -2749,7 +3033,7 @@ function switchTab(tabId) {
       tab.model = model;
       if (languageMode === 'markdown' && previewVisible) updatePreview();
     }
-    editor.focus();
+    relayoutMonacoAfterShow();
   } else if (editorMode === 'tiptap') {
     initTipTap().then(() => {
       setActiveEditorContent(tab.content);
@@ -2850,13 +3134,17 @@ function renderTabs() {
     `;
   }).join('');
   
-  // Add event listeners
   tabsList.querySelectorAll('.tab').forEach(tabEl => {
     const tabId = tabEl.getAttribute('data-tab-id');
     tabEl.addEventListener('click', (e) => {
       if (e.target.classList.contains('tab-close')) {
         e.stopPropagation();
-        closeTab(tabId);
+        const tab = tabs.find(t => t.id === tabId);
+        if (tab && tab.isSettings) {
+          tryCloseSettingsTab();
+        } else {
+          closeTab(tabId);
+        }
       } else {
         switchTab(tabId);
       }
@@ -2955,6 +3243,13 @@ async function restoreOpenFiles() {
     }
   }
 }
+
+// Expose for main process (window close / quit with unsaved settings)
+window.hasUnsavedSettingsChanges = hasUnsavedSettingsChanges;
+window.saveSettingsFromForm = async function () {
+  const settings = getSettingsFromForm();
+  await ipcRenderer.invoke('save-settings', settings);
+};
 
 // Cleanup on window close
 window.addEventListener('beforeunload', () => {

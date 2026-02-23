@@ -14,6 +14,10 @@
       <button id="new-tab-btn" class="new-tab-btn" title="New Tab">+</button>
     </div>
     <div id="format-bar" class="format-bar hidden">
+      <div class="format-bar-group editor-mode-indicator-wrap">
+        <span id="editor-mode-indicator" class="editor-mode-indicator" title="Click to switch editor (Monaco / TipTap)">Monaco</span>
+      </div>
+      <div class="format-bar-separator"></div>
       <div class="format-bar-group">
         <select id="format-style" class="format-select" title="Text Style">
           <option value="normal">Normal</option>
@@ -87,6 +91,7 @@
         </div>
       </div>
       <div id="settings-container" class="settings-tab-container hidden">
+        <div id="settings-saved-notification" class="settings-saved-notification hidden" aria-live="polite">Settings saved</div>
         <div class="settings-content">
           <h1>Settings</h1>
           
@@ -161,9 +166,9 @@
               </div>
             </div>
             
-            <div class="setting-item">
+            <div class="setting-item" id="settings-languageMode-wrap">
               <label>Language Mode:</label>
-              <div class="radio-group">
+              <div class="radio-group" id="settings-languageMode-group">
                 <label>
                   <input type="radio" name="settings-languageMode" value="plaintext" id="settings-languageMode-plaintext">
                   Plain Text
@@ -319,6 +324,7 @@
     </div>
     <div id="status-bar" class="status-bar">
       <div class="status-left">
+        <span id="status-editor-mode" class="status-editor-mode">Editor: Monaco</span>
         <span id="status-word-count">Words: 0 | Characters: 0</span>
       </div>
       <div class="status-right">
